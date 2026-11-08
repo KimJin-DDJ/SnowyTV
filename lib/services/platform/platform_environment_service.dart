@@ -34,6 +34,20 @@ class PlatformEnvironmentService {
 
   static bool? _isTv;
   static bool? _isEmulator;
+  static bool? _isChromecastHd;
+
+  static Future<bool> isChromecastHd() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return _isChromecastHd ??=
+          await _intentChannel.invokeMethod<bool>('isChromecastHd') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      KazumiLogger().w('Failed to detect Chromecast HD', error: e);
+      return false;
+    }
+  }
 
   static Future<bool> isAndroidTv() async {
     if (!Platform.isAndroid) return false;

@@ -117,6 +117,8 @@ class MainActivity: AudioServiceActivity() {
                 result.success(sdkVersion)
             } else if (call.method == "isAndroidTv") {
                 result.success(packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK))
+            } else if (call.method == "isChromecastHd") {
+                result.success(Build.DEVICE == "boreal")
             } else if (call.method == "isEmulator") {
                 val isEmulator = Build.FINGERPRINT.startsWith("generic")
                     || Build.FINGERPRINT.startsWith("unknown")

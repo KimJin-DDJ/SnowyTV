@@ -43,9 +43,15 @@ class M3u8Segment {
 class M3u8Variant {
   final int bandwidth;
   final String? resolution;
+  final double? frameRate;
   final String uri;
 
-  M3u8Variant({required this.bandwidth, this.resolution, required this.uri});
+  M3u8Variant({
+    required this.bandwidth,
+    this.resolution,
+    this.frameRate,
+    required this.uri,
+  });
 }
 
 class M3u8MasterPlaylist {
@@ -105,9 +111,10 @@ class M3u8Parser {
         int bandwidth = 0;
         String? resolution;
 
-        final bandwidthMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(attrs);
+        final bandwidthMatch =
+            RegExp(r'(?:^|,)\s*BANDWIDTH=(\d+)').firstMatch(attrs);
         if (bandwidthMatch != null) {
-          bandwidth = int.parse(bandwidthMatch.group(1)!);
+          bandwidth = int.tryParse(bandwidthMatch.group(1)!) ?? 0;
         }
 
         final resolutionMatch =
@@ -119,7 +126,16 @@ class M3u8Parser {
         if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
           final uri = resolveUrl(baseUrl, lines[i + 1]);
           variants.add(M3u8Variant(
-              bandwidth: bandwidth, resolution: resolution, uri: uri));
+            bandwidth: bandwidth,
+            resolution: resolution,
+            frameRate: double.tryParse(
+              RegExp(r'(?:^|,)\s*FRAME-RATE=([^,]+)')
+                      .firstMatch(attrs)
+                      ?.group(1) ??
+                  '',
+            ),
+            uri: uri,
+          ));
         }
       }
     }

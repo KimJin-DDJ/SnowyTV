@@ -199,8 +199,8 @@ class QualityInspectorSheet extends StatelessWidget {
                         child: Column(
                           children: [
                             _optimizationRow(
-                              'HLS 满血码率策略 (hls-bitrate: max)',
-                              '已强制锁定最高码率分流（保障 3.0 Mbps 原画细节）',
+                              'HLS 清晰度选择',
+                              'MXdm 在 Chromecast HD 上优先选择设备可解码的分流',
                               true,
                             ),
                             const Divider(height: 16),

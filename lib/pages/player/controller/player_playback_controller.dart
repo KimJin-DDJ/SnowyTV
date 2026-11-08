@@ -272,6 +272,7 @@ abstract class _PlayerPlaybackController with Store {
     required bool Function() canInstall,
     int offset = 0,
     VideoSourceFormat videoSourceFormat = VideoSourceFormat.auto,
+    int? hlsBitrateLimit,
   }) async {
     startOffset = offset;
     superResolutionMode = SuperResolutionMode.fromStorageValue(
@@ -357,8 +358,8 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       // ===== 动漫画质与性能平衡优化配置 =====
-      // 1. 强制锁定最高码率分支（保障 75 寸大屏获得最高细节原画）
-      await safeSetProperty("hls-bitrate", "max");
+      // 1. MXdm 可以根据设备规格选择清单里的兼容分流。
+      await safeSetProperty('hls-bitrate', hlsBitrateLimit?.toString() ?? 'max');
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
       await safeSetProperty("ytdl-format", "bestvideo+bestaudio/best");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);

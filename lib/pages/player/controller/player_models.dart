@@ -5,6 +5,7 @@ class PlaybackInitParams {
   final int offset;
   final bool isLocalPlayback;
   final VideoSourceFormat videoSourceFormat;
+  final int? hlsBitrateLimit;
   final int bangumiId;
   final String pluginName;
   final int episode;
@@ -35,6 +36,7 @@ class PlaybackInitParams {
     required this.referer,
     required this.currentRoad,
     this.videoSourceFormat = VideoSourceFormat.auto,
+    this.hlsBitrateLimit,
     this.pageUrl = '',
     this.sortNumber,
     this.coverUrl,

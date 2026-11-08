@@ -10,6 +10,9 @@ import 'package:kazumi/modules/download/download_module.dart';
 import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/repositories/download_repository.dart';
 import 'package:kazumi/services/download/download_manager.dart';
+import 'package:kazumi/services/platform/platform_environment_service.dart';
+import 'package:kazumi/services/video_source/mxdm_tv_source_probe.dart';
+import 'package:kazumi/services/video_source/mxdm_tv_source_selection.dart';
 import 'package:kazumi/services/video_source/services.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:mobx/mobx.dart';
@@ -145,6 +148,7 @@ abstract class _VideoPageController with Store implements Disposable {
   final IDownloadManager downloadManager;
 
   WebViewVideoSourceService? _videoSourceService;
+  MxdmTvSourceProbe? _mxdmSourceProbe;
 
   final StreamController<String> _logStreamController =
       StreamController<String>.broadcast();
@@ -430,6 +434,8 @@ abstract class _VideoPageController with Store implements Disposable {
     _danmakuSessions.cancel();
     playerController.danmaku.finishDanmakuLoad();
     _videoSourceService?.cancel();
+    _mxdmSourceProbe?.close();
+    _mxdmSourceProbe = null;
 
     await playerController.stop();
     if (session.isStale) {
@@ -459,15 +465,10 @@ abstract class _VideoPageController with Store implements Disposable {
 
     KazumiLogger()
         .i('VideoPageController: changed to ${resolvedEpisode.displayTitle}');
-    final urlItem = normalizeEpisodeUrl(
-      currentPlugin.baseUrl,
-      resolvedEpisode.pageUrl,
-    );
 
     await _resolveWithVideoSourceService(
-      urlItem,
       offset,
-      resolvedEpisode: resolvedEpisode,
+      preferredEpisode: resolvedEpisode,
       session: session,
       playerController: playerController,
     );
@@ -587,35 +588,22 @@ abstract class _VideoPageController with Store implements Disposable {
   }
 
   Future<void> _resolveWithVideoSourceService(
-    String url,
     int offset, {
-    required EpisodeRef resolvedEpisode,
+    required EpisodeRef preferredEpisode,
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
-    _videoSourceService ??= WebViewVideoSourceService();
+    final resolver = _videoSourceService ??= WebViewVideoSourceService();
 
     await _logSubscription?.cancel();
-    _logSubscription = _videoSourceService!.onLog.listen((log) {
+    if (session.isStale) return;
+    _logSubscription = resolver.onLog.listen((log) {
       if (!_logStreamController.isClosed) {
         _logStreamController.add(log);
       }
     });
 
     try {
-      final source = await _videoSourceService!.resolve(
-        url,
-        useLegacyParser: currentPlugin.useLegacyParser,
-        offset: offset,
-      );
-
-      if (session.isStale) {
-        return;
-      }
-      _finishLoading();
-      KazumiLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
-
       final bool forceAdBlocker =
           GStorage.getSetting(SettingsKeys.forceAdBlocker);
 
@@ -625,27 +613,85 @@ abstract class _VideoPageController with Store implements Disposable {
               ? (currentPlugin.baseUrl.endsWith('/')
                   ? currentPlugin.baseUrl
                   : '${currentPlugin.baseUrl}/')
-              : (resolvedEpisode.pageUrl.isNotEmpty
-                  ? resolvedEpisode.pageUrl
-                  : ''));
+              : preferredEpisode.pageUrl);
+      final headers = {
+        'user-agent': currentPlugin.userAgent.isEmpty
+            ? getRandomUA()
+            : currentPlugin.userAgent,
+        if (effectiveReferer.isNotEmpty) 'referer': effectiveReferer,
+      };
+
+      Future<VideoSource> resolve(EpisodeRef episode, Duration timeout) =>
+          resolver.resolve(
+            normalizeEpisodeUrl(currentPlugin.baseUrl, episode.pageUrl),
+            useLegacyParser: currentPlugin.useLegacyParser,
+            offset: offset,
+            timeout: timeout,
+          );
+
+      final VideoSource source;
+      var resolvedEpisode = preferredEpisode;
+      int? hlsBitrateLimit;
+      final useMxdmTvSelection = pluginNameKey(currentPlugin.name) == 'mxdm' &&
+          await PlatformEnvironmentService.isAndroidTv();
+      if (session.isStale) return;
+      if (useMxdmTvSelection) {
+        final limitTo1080p = await PlatformEnvironmentService.isChromecastHd() ||
+            await PlatformEnvironmentService.isEmulator();
+        if (session.isStale) return;
+        final probe = MxdmTvSourceProbe(limitTo1080p: limitTo1080p);
+        _mxdmSourceProbe = probe;
+        final MxdmTvSourceSelection<EpisodeRef>? selection;
+        try {
+          selection = await selectMxdmTvSource(
+            _mxdmCandidates(preferredEpisode),
+            resolve: resolve,
+            inspect: (source) => probe.inspect(source, headers),
+            isActive: () => session.isActive,
+          );
+        } finally {
+          if (identical(_mxdmSourceProbe, probe)) {
+            _mxdmSourceProbe = null;
+            probe.close();
+          }
+        }
+        if (session.isStale) return;
+        if (selection == null) {
+          _failLoading('MXdm 暂无可用线路，请稍后重试');
+          return;
+        }
+        source = selection.source;
+        resolvedEpisode = selection.episode;
+        hlsBitrateLimit = selection.check.hlsBitrateLimit;
+        if (resolvedEpisode.roadIndex != preferredEpisode.roadIndex) {
+          _applyResolvedSelection(resolvedEpisode);
+          _setOnlineHistoryIdentity(resolvedEpisode);
+          final roadNumber = resolvedEpisode.roadIndex + 1;
+          KazumiLogger().i('MXdm TV: using road $roadNumber for '
+              '${resolvedEpisode.displayTitle}');
+          KazumiDialog.showToast(message: 'MXdm 已切换到播放线路 $roadNumber');
+        }
+      } else {
+        source = await resolve(preferredEpisode, const Duration(seconds: 15));
+      }
+      if (session.isStale) return;
+      _finishLoading();
+      KazumiLogger()
+          .i('VideoPageController: resolved video URL: ${source.url}');
 
       final params = PlaybackInitParams(
         videoUrl: source.url,
         offset: source.offset,
         isLocalPlayback: false,
         videoSourceFormat: source.format,
+        hlsBitrateLimit: hlsBitrateLimit,
         bangumiId: bangumiItem.id,
         pluginName: currentPlugin.name,
         episode: resolvedEpisode.listIndex,
         danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
         pageUrl: resolvedEpisode.pageUrl,
         sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: {
-          'user-agent': currentPlugin.userAgent.isEmpty
-              ? getRandomUA()
-              : currentPlugin.userAgent,
-          if (effectiveReferer.isNotEmpty) 'referer': effectiveReferer,
-        },
+        httpHeaders: headers,
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
         referer: effectiveReferer,
@@ -678,6 +724,20 @@ abstract class _VideoPageController with Store implements Disposable {
         return;
       }
       _failLoading('视频解析失败：${e.toString()}');
+    }
+  }
+
+  Iterable<EpisodeRef> _mxdmCandidates(EpisodeRef preferred) sync* {
+    yield preferred;
+    for (var road = 0; road < roadList.length; road++) {
+      if (road == preferred.roadIndex) continue;
+      final index = matchingMxdmEpisodeIndex(
+        preferred.displayTitle,
+        roadList[road].identifier,
+      );
+      if (index == null) continue;
+      final episode = _resolveOnlineEpisode(index + 1, road: road);
+      if (episode != null) yield episode;
     }
   }
 
@@ -754,6 +814,8 @@ abstract class _VideoPageController with Store implements Disposable {
   void dispose() {
     unawaited(fullscreen.close());
     _playbackSessions.cancel();
+    _mxdmSourceProbe?.close();
+    _mxdmSourceProbe = null;
     _danmakuSessions.cancel();
     _commentSessions.cancel();
     _logSubscription?.cancel();
