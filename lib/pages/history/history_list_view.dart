@@ -95,6 +95,7 @@ class _HistoryListViewState extends State<HistoryListView> {
       },
       child: Focus(
         autofocus: true,
+        skipTraversal: true,
         child: LayoutBuilder(builder: (context, constraints) {
           final contentWidth = constraints.maxWidth.clamp(0.0, 960.0);
           // Preserve full-width scrolling while centering the content.

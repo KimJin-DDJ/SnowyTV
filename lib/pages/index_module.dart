@@ -15,6 +15,7 @@ import 'package:kazumi/pages/search/search_module.dart';
 import 'package:kazumi/pages/settings/settings_module.dart';
 import 'package:kazumi/pages/timeline/timeline_controller.dart';
 import 'package:kazumi/pages/timeline/timeline_module.dart';
+import 'package:kazumi/pages/updates/recent_updates_module.dart';
 import 'package:kazumi/pages/video/video_module.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/plugins/plugins_controller.dart';
@@ -60,6 +61,7 @@ final tabModule = createModule(
             )
             ..module(popularModule)
             ..module(timelineModule)
+            ..module(recentUpdatesModule)
             ..module(collectModule)
             ..module(myModule);
         },

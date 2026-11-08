@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,8 @@ import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/bean/widget/state_presentation.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/pages/search/search_controller.dart';
+import 'package:kazumi/pages/search/tv_search_keyboard.dart';
+import 'package:kazumi/utils/pinyin_search.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/utils/constants.dart';
 import 'package:kazumi/utils/date_time.dart';
@@ -43,7 +46,11 @@ class _SearchPageState extends State<SearchPage> {
     debugLabel: 'Search filter button',
     onKeyEvent: _handleFilterKey,
   );
+  final _keyboardFocus = FocusNode(debugLabel: 'Search keyboard first key');
   final _scroll = ScrollController();
+  /// 电视上默认用屏幕键盘（遥控器打不了系统输入法），需要中文时再切系统输入法。
+  final bool _tvKeyboard = Platform.isAndroid;
+  bool _systemIme = false;
   // Preserve the input subtree when the header moves in or out of the scroll view.
   final _searchHeaderKey = GlobalKey();
   String? _submittedQuery;
@@ -51,11 +58,17 @@ class _SearchPageState extends State<SearchPage> {
 
   SearchPageController get _controller => widget.controller;
   bool get _hasSearched => _submittedQuery != null;
+  bool get _useScreenKeyboard => _tvKeyboard && !_systemIme;
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_loadMoreOnScroll);
+    _inputFocus.addListener(() {
+      if (!_inputFocus.hasFocus && _systemIme && mounted) {
+        setState(() => _systemIme = false);
+      }
+    });
     _controller.loadSearchHistories();
     if (widget.inputTag.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -71,6 +84,7 @@ class _SearchPageState extends State<SearchPage> {
     _input.dispose();
     _inputFocus.dispose();
     _filterFocus.dispose();
+    _keyboardFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -78,7 +92,19 @@ class _SearchPageState extends State<SearchPage> {
   KeyEventResult _handleSearchInputKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
+    final isSelect = event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    if (isSelect && _useScreenKeyboard) {
+      _openKeyboard();
+      return KeyEventResult.handled;
+    }
+
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (!_hasSearched && _useScreenKeyboard && _keyboardFocus.canRequestFocus) {
+        _keyboardFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
       if (!_hasSearched && _filterFocus.canRequestFocus) {
         _filterFocus.requestFocus();
         return KeyEventResult.handled;
@@ -141,6 +167,50 @@ class _SearchPageState extends State<SearchPage> {
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
+  }
+
+  void _openKeyboard() {
+    if (_hasSearched) setState(() => _submittedQuery = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _keyboardFocus.context != null) {
+        _keyboardFocus.requestFocus();
+      }
+    });
+  }
+
+  void _typeKey(String char) {
+    final text = _input.text;
+    if (char == ' ' && (text.isEmpty || text.endsWith(' '))) return;
+    _writeInput(text + char);
+  }
+
+  void _backspace() {
+    final text = _input.text;
+    if (text.isEmpty) return;
+    _writeInput(text.substring(0, text.length - 1));
+  }
+
+  void _useSystemKeyboard() {
+    setState(() => _systemIme = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _inputFocus.requestFocus();
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
+  }
+
+  /// 输入的是拼音首字母（如 dpcq）时，Bangumi 搜不到，
+  /// 换成本地匹配到的番剧名去搜。
+  Future<void> _smartSubmit(String value) {
+    final text = value.trim();
+    if (PinyinSearch.isPinyinQuery(text) && !text.contains(':')) {
+      final matches = PinyinSearch.searchLocal(text, limit: 1);
+      if (matches.isNotEmpty) {
+        final item = matches.first;
+        return _submit(item.nameCn.isNotEmpty ? item.nameCn : item.name);
+      }
+    }
+    return _submit(value);
   }
 
   Future<void> _submit(String value) async {
@@ -209,8 +279,10 @@ class _SearchPageState extends State<SearchPage> {
       builder: (context, value, child) => SearchBar(
         controller: _input,
         focusNode: _inputFocus,
-        hintText: '搜索番剧名称',
+        hintText: _tvKeyboard ? '搜索番剧 · 支持拼音首字母，如 dpcq' : '搜索番剧名称',
         textInputAction: TextInputAction.search,
+        keyboardType: _useScreenKeyboard ? TextInputType.none : null,
+        onTap: _useScreenKeyboard ? _openKeyboard : null,
         constraints: const BoxConstraints(minHeight: 64),
         elevation: const WidgetStatePropertyAll(0),
         backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerHigh),
@@ -218,7 +290,7 @@ class _SearchPageState extends State<SearchPage> {
             const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8)),
         leading: IconButton(
           tooltip: '搜索',
-          onPressed: () => _submit(_input.text),
+          onPressed: () => _smartSubmit(_input.text),
           icon: const Icon(Icons.search_rounded),
         ),
         trailing: [
@@ -233,7 +305,7 @@ class _SearchPageState extends State<SearchPage> {
             icon: const Icon(Icons.image_search_rounded),
           ),
         ],
-        onSubmitted: _submit,
+        onSubmitted: _smartSubmit,
       ),
     );
   }
@@ -315,6 +387,83 @@ class _SearchPageState extends State<SearchPage> {
             ]);
       }),
     ]);
+  }
+
+  Widget _tvDiscovery() {
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TvSearchKeyboard(
+        firstKeyFocus: _keyboardFocus,
+        onInput: _typeKey,
+        onBackspace: _backspace,
+        onClear: () => _writeInput(''),
+        onSubmit: () => _smartSubmit(_input.text),
+        onSystemKeyboard: _useSystemKeyboard,
+      ),
+      const SizedBox(width: 24),
+      Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [_localMatches(), _discovery()])),
+    ]);
+  }
+
+  /// 输入时实时显示本地匹配（支持拼音首字母 / 全拼）。
+  Widget _localMatches() {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _input,
+      builder: (context, value, _) {
+        final query = value.text.trim();
+        if (query.isEmpty) return const SizedBox.shrink();
+        final matches = PinyinSearch.searchLocal(query, limit: 8);
+        final theme = Theme.of(context);
+        final pinyin = PinyinSearch.isPinyinQuery(query);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 4),
+                child: Text(
+                  matches.isEmpty
+                      ? (pinyin
+                          ? '本地没有匹配「$query」的番剧，按「搜索」在线查找'
+                          : '按「搜索」在线查找「$query」')
+                      : pinyin
+                          ? '拼音匹配 · 按确认直接打开'
+                          : '本地匹配 · 按确认直接打开',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+              for (final item in matches)
+                Material(
+                  type: MaterialType.transparency,
+                  child: ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    leading: Icon(Icons.movie_outlined,
+                        color: theme.colorScheme.primary, size: 22),
+                    title: Text(
+                        item.nameCn.isNotEmpty ? item.nameCn : item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    subtitle: item.nameCn.isNotEmpty && item.name.isNotEmpty
+                        ? Text(item.name,
+                            maxLines: 1, overflow: TextOverflow.ellipsis)
+                        : null,
+                    trailing: Icon(Icons.chevron_right_rounded,
+                        color: theme.colorScheme.onSurfaceVariant),
+                    onTap: () => context.pushNamed('/info/', arguments: item),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   List<Widget> _resultSlivers(double width) {
@@ -461,7 +610,8 @@ class _SearchPageState extends State<SearchPage> {
           top: false,
           child: LayoutBuilder(builder: (context, constraints) {
             final horizontal = constraints.maxWidth >= 700 ? 32.0 : 20.0;
-            final width = math.min(_hasSearched ? 1120.0 : 760.0,
+            final width = math.min(
+                _hasSearched || _tvKeyboard ? 1120.0 : 760.0,
                 constraints.maxWidth - horizontal * 2);
             final inset = (constraints.maxWidth - width) / 2;
             final pinSearch = _hasSearched &&
@@ -493,7 +643,16 @@ class _SearchPageState extends State<SearchPage> {
                               ]))
                       : scrollView([
                           SliverToBoxAdapter(child: _header()),
-                          SliverToBoxAdapter(child: _discovery()),
+                          SliverToBoxAdapter(
+                              child: _tvKeyboard
+                                  ? _tvDiscovery()
+                                  : Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                          _localMatches(),
+                                          _discovery(),
+                                        ])),
                         ])),
             ]);
           })),

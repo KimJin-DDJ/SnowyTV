@@ -26,6 +26,7 @@ class _InterfaceSettingsPageState extends State<InterfaceSettingsPage> {
   static const Map<String, String> defaultPageMap = {
     '/tab/popular/': '推荐',
     '/tab/timeline/': '时间表',
+    '/tab/updates/': '最近更新',
     '/tab/collect/': '追番',
     '/tab/my/': '我的',
   };

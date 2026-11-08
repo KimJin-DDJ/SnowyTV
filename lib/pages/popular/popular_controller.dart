@@ -1,3 +1,4 @@
+import 'package:kazumi/utils/pinyin_search.dart';
 import 'dart:math';
 import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
@@ -64,6 +65,7 @@ abstract class _PopularController with Store {
     }
     final existingIds = trendList.map((item) => item.id).toSet();
     trendList.addAll(result.where((item) => existingIds.add(item.id)));
+    PinyinSearch.register(result);
     isLoadingMore = false;
     isTimeOut = trendList.isEmpty;
   }
@@ -85,6 +87,7 @@ abstract class _PopularController with Store {
             tag: tag,
           );
     bangumiList.addAll(result);
+    PinyinSearch.register(result);
     isLoadingMore = false;
     isTimeOut = bangumiList.isEmpty;
   }

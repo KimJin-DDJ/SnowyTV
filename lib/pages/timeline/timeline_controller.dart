@@ -1,3 +1,4 @@
+import 'package:kazumi/utils/pinyin_search.dart';
 import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/utils/anime_season.dart';
@@ -59,6 +60,7 @@ abstract class _TimelineController with Store {
       bangumiCalendar.clear();
       if (isSameSeason(date, DateTime.now())) {
         bangumiCalendar.addAll(await BangumiApi.getCalendar());
+        PinyinSearch.register(bangumiCalendar.expand((day) => day));
         isTimeOut = bangumiCalendar.isEmpty;
       } else {
         await _getSchedulesBySeason(date);

@@ -83,8 +83,27 @@ class MenuFocusBridge {
     int? destinationCount,
     FocusNode? leadingAction,
   }) {
-    if (_directionOf(event) != toMenu) return KeyEventResult.ignored;
-    final focus = FocusManager.instance.primaryFocus;
+    final direction = _directionOf(event);
+    if (direction == null) return KeyEventResult.ignored;
+    final current = FocusManager.instance.primaryFocus;
+    // 焦点停在页面级的容器节点上（没有焦点框，方向键也走不出去）时，
+    // 先把它落到页面里第一个可见的控件上。
+    if (current != null && current.skipTraversal && current is! FocusScopeNode) {
+      final area = current.rect;
+      final visible = current.traversalDescendants
+          .where((node) => _isUsable(node) && node.rect.overlaps(area))
+          .toList()
+        ..sort((a, b) {
+          final byTop = a.rect.top.compareTo(b.rect.top);
+          return byTop != 0 ? byTop : a.rect.left.compareTo(b.rect.left);
+        });
+      if (visible.isNotEmpty) {
+        visible.first.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    if (direction != toMenu) return KeyEventResult.ignored;
+    final focus = current;
     final focusContext = focus?.context;
     if (focus == null || focusContext == null) return KeyEventResult.ignored;
     // 输入框里的方向键要留给光标

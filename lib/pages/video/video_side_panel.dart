@@ -33,6 +33,7 @@ class VideoSidePanelState extends State<VideoSidePanel>
     CurveTween(curve: Curves.easeIn),
   );
   LocalHistoryEntry? _historyEntry;
+  final FocusScopeNode _scope = FocusScopeNode(debugLabel: 'Video side panel');
 
   bool get _isOpening =>
       _animation.status == AnimationStatus.forward ||
@@ -61,7 +62,25 @@ class VideoSidePanelState extends State<VideoSidePanel>
         route.addLocalHistoryEntry(entry);
       }
       widget.onOpened?.call();
+      _ensureFocusInside();
     }
+  }
+
+  /// 遥控器操作时，面板打开后焦点必须进到面板里，否则方向键还在控制播放器，
+  /// 面板里的「播放线路」和剧集都选不到。onOpened 里会尝试聚焦当前集，
+  /// 这里兜底：几帧后焦点仍不在面板内，就落到面板第一个可聚焦控件上。
+  void _ensureFocusInside() {
+    Future<void>.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted || !_isOpening || _scope.hasFocus) return;
+      final first = _scope.traversalDescendants
+          .where((node) => node.canRequestFocus && node.context != null)
+          .firstOrNull;
+      if (first != null) {
+        first.requestFocus();
+      } else {
+        _scope.requestFocus();
+      }
+    });
   }
 
   void close() {
@@ -94,6 +113,7 @@ class VideoSidePanelState extends State<VideoSidePanel>
   void dispose() {
     _removeHistoryEntry();
     _animation.dispose();
+    _scope.dispose();
     super.dispose();
   }
 
@@ -148,7 +168,8 @@ class VideoSidePanelState extends State<VideoSidePanel>
           child: MediaQuery.removePadding(
             context: context,
             removeTop: true,
-            child: SafeArea(child: FocusScope(child: widget.child)),
+            child: SafeArea(
+                child: FocusScope(node: _scope, child: widget.child)),
           ),
         ),
       ),

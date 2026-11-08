@@ -244,6 +244,11 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
               label: '时间表',
             ),
             NavigationDestination(
+              selectedIcon: Icon(Icons.update),
+              icon: Icon(Icons.update_outlined),
+              label: '更新',
+            ),
+            NavigationDestination(
               selectedIcon: Icon(Icons.favorite),
               icon: Icon(Icons.favorite_outlined),
               label: '追番',
@@ -302,6 +307,11 @@ class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
                     selectedIcon: Icon(Icons.timeline),
                     icon: Icon(Icons.timeline_outlined),
                     label: Text('时间表'),
+                  ),
+                  NavigationRailDestination(
+                    selectedIcon: Icon(Icons.update),
+                    icon: Icon(Icons.update_outlined),
+                    label: Text('更新'),
                   ),
                   NavigationRailDestination(
                     selectedIcon: Icon(Icons.favorite),

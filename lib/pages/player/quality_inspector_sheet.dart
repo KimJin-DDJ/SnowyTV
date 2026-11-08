@@ -452,6 +452,15 @@ class _DpadScrollState extends State<_DpadScroll> {
         node.requestFocus();
         return KeyEventResult.handled;
       }
+      // 「切换线路」已经是最后一个按钮，再按下键不要把焦点送出面板。
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        final buttons = node.traversalDescendants
+            .where((d) => d.canRequestFocus && d.context != null);
+        final focused = FocusManager.instance.primaryFocus;
+        if (buttons.isNotEmpty && buttons.last == focused) {
+          return KeyEventResult.handled;
+        }
+      }
       return KeyEventResult.ignored;
     }
     if (!_controller.hasClients) return KeyEventResult.ignored;

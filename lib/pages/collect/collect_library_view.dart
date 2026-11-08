@@ -49,7 +49,10 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
     with TickerProviderStateMixin {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-  final _libraryFocus = FocusNode();
+  // 页面级焦点只用来接住快捷键，不能参与方向键遍历：它没有可见焦点框，
+  // 遥控器一旦落到它上面就会"卡住"（右边没有任何控件）。
+  final _libraryFocus = FocusNode(
+      debugLabel: 'Collect library', skipTraversal: true);
   // Keep tab animations alive when the category scroll view is replaced.
   final _categoriesKey = GlobalKey();
   late TabController _tabController;
@@ -135,7 +138,11 @@ class _CollectLibraryViewState extends State<CollectLibraryView>
   void _onCategoryChanged() {
     final type = _collectCategories[_tabController.index];
     if (type == _selectedType) return;
-    _libraryFocus.requestFocus();
+    // 用遥控器在分类标签上左右切换时，焦点要留在标签上。
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    final onTabs = focusContext != null &&
+        focusContext.findAncestorWidgetOfExactType<TabBar>() != null;
+    if (!onTabs) _libraryFocus.requestFocus();
     setState(() => _selectedType = type);
   }
 

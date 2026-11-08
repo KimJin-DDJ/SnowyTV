@@ -1,3 +1,4 @@
+import 'package:kazumi/utils/pinyin_search.dart';
 import 'dart:io';
 
 import 'package:mobx/mobx.dart';
@@ -124,6 +125,7 @@ abstract class _SearchPageController with Store {
           page.items.where((item) => existingIds.add(item.id)).toList();
       if (newItems.isNotEmpty) {
         bangumiList.addAll(newItems);
+        PinyinSearch.register(newItems);
         break;
       }
     } while (hasMoreSearchResults && pagesFetched < _maxPagesPerSearch);

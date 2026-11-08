@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
 
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
@@ -41,6 +42,7 @@ class EpisodeSelectionPanel extends StatefulWidget {
 class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
   final _scrollController = ScrollController();
   final _currentEpisodeFocus = FocusNode(debugLabel: 'Current episode');
+  final _roadFocus = FocusNode(debugLabel: 'Playback road selector');
   late final _observerController = ListObserverController(
     controller: _scrollController,
   )..cacheJumpIndexOffset = false;
@@ -103,8 +105,30 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
   @override
   void dispose() {
     _currentEpisodeFocus.dispose();
+    _roadFocus.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 剧集列表滚动后「播放线路」已经滚出屏幕，方向键遍历够不到没构建的控件。
+  /// 在工具栏上按上键时先滚回顶部，再把焦点交给线路选择。
+  KeyEventResult _handleToolbarKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    if (_roadFocus.context != null && _roadFocus.rect.height > 0 &&
+        _scrollController.hasClients &&
+        _scrollController.offset <= 0) {
+      _roadFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (!_scrollController.hasClients) return KeyEventResult.ignored;
+    _scrollController.jumpTo(0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _roadFocus.context != null) _roadFocus.requestFocus();
+    });
+    return KeyEventResult.handled;
   }
 
   @override
@@ -146,6 +170,7 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                         ),
                         const SizedBox(height: 16),
                         _RoadSelector(
+                          focusNode: _roadFocus,
                           roads: widget.roads,
                           visibleRoad: _visibleRoad,
                           isOffline: widget.isOffline,
@@ -161,7 +186,11 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                   delegate: _EpisodeToolbar(
                     height: _toolbarHeight,
                     color: colors.surface,
-                    child: Padding(
+                    child: Focus(
+                      canRequestFocus: false,
+                      skipTraversal: true,
+                      onKeyEvent: _handleToolbarKey,
+                      child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
                       child: Row(
                         children: [
@@ -201,6 +230,7 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                             ),
                         ],
                       ),
+                    ),
                     ),
                   ),
                 ),
@@ -297,6 +327,7 @@ class _EpisodeToolbar extends SliverPersistentHeaderDelegate {
 
 class _RoadSelector extends StatefulWidget {
   const _RoadSelector({
+    required this.focusNode,
     required this.roads,
     required this.visibleRoad,
     required this.isOffline,
@@ -304,6 +335,7 @@ class _RoadSelector extends StatefulWidget {
     required this.disableAnimations,
   });
 
+  final FocusNode focusNode;
   final List<Road> roads;
   final int visibleRoad;
   final bool isOffline;
@@ -315,7 +347,15 @@ class _RoadSelector extends StatefulWidget {
 }
 
 class _RoadSelectorState extends State<_RoadSelector> {
-  final _focusNode = FocusNode(debugLabel: 'Playback road selector');
+  FocusNode get _focusNode => widget.focusNode;
+  final List<FocusNode> _itemFocus = [];
+
+  FocusNode _itemNode(int index) {
+    while (_itemFocus.length <= index) {
+      _itemFocus.add(FocusNode(debugLabel: 'Road option ${_itemFocus.length}'));
+    }
+    return _itemFocus[index];
+  }
   FocusNode? _focusBeforeOpen;
   bool _pointerActivation = false;
 
@@ -337,6 +377,13 @@ class _RoadSelectorState extends State<_RoadSelector> {
         ? null
         : previousFocus;
     controller.open();
+    // 遥控器：菜单打开后把焦点放到当前线路上，上下键才能在选项间移动。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !controller.isOpen || widget.roads.isEmpty) return;
+      final index = widget.visibleRoad.clamp(0, widget.roads.length - 1);
+      final node = _itemNode(index);
+      if (node.context != null) node.requestFocus();
+    });
   }
 
   void _handleClose() {
@@ -361,7 +408,9 @@ class _RoadSelectorState extends State<_RoadSelector> {
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    for (final node in _itemFocus) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -378,6 +427,7 @@ class _RoadSelectorState extends State<_RoadSelector> {
         inMutuallyExclusiveGroup: true,
         child: MenuItemButton(
           key: ValueKey('road-option-$index'),
+          focusNode: _itemNode(index),
           onPressed: () => widget.onChanged(index),
           style: ButtonStyle(
             minimumSize: WidgetStatePropertyAll(Size(width, 56)),
