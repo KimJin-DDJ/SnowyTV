@@ -95,23 +95,31 @@ class PluginSearchService {
         shouldRethrow: true,
         cancelToken: _cancelToken,
       );
-    _effectiveKeywords[plugin.name] = keyword;
+    final keywords = {
+      plugin.preferredSearchKeyword(keyword),
+      keyword,
+      ?fallback,
+    };
     try {
-      PluginSearchResponse result;
-      try {
-        result = await search(keyword);
-      } on NoResultException {
-        if (fallback == null || _isCancelled || session.isStale) rethrow;
-        _effectiveKeywords[plugin.name] = fallback;
-        result = await search(fallback);
+      for (final query in keywords) {
+        if (_isCancelled || session.isStale) return;
+        _effectiveKeywords[plugin.name] = query;
+        PluginSearchResponse result;
+        try {
+          result = await search(query);
+        } on NoResultException {
+          if (query == keywords.last) rethrow;
+          continue;
+        }
+        if (_isCancelled || session.isStale) return;
+        infoController.pluginSearchStatus[plugin.name] =
+            PluginSearchStatus.success;
+        if (result.data.isNotEmpty) {
+          pluginsController.validityTracker.markSearchValid(plugin.name);
+        }
+        infoController.pluginSearchResponseList.add(result);
+        return;
       }
-      if (_isCancelled || session.isStale) return;
-      infoController.pluginSearchStatus[plugin.name] =
-          PluginSearchStatus.success;
-      if (result.data.isNotEmpty) {
-        pluginsController.validityTracker.markSearchValid(plugin.name);
-      }
-      infoController.pluginSearchResponseList.add(result);
     } catch (error) {
       if (_isCancelled || session.isStale) return;
       _handleSearchError(plugin, error);

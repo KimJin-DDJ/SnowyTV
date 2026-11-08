@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:kazumi/pages/player/player_keyboard_shortcuts.dart';
 import 'package:kazumi/pages/player/player_transport_bar.dart';
 import 'package:kazumi/pages/video/video_side_panel.dart';
+import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/services/plugin/plugin_search_service.dart';
 
 void main() {
@@ -68,6 +69,27 @@ void main() {
     expect(seriesSearchFallback('凡人修仙传 新年番'), '凡人修仙传');
     expect(seriesSearchFallback('凡人修仙传'), isNull);
     expect(seriesSearchFallback('凡人修仙传：星海飞驰篇'), isNull);
+  });
+
+  test('MXdm uses the complete Battle Through the Heavens annual series', () {
+    final plugin = Plugin.fromJson({
+      'name': 'MXdm',
+      'baseURL': 'https://www.dcc3.com',
+    });
+
+    expect(plugin.preferredSearchKeyword('斗破苍穹 年番4'), '斗破苍穹年番');
+    expect(plugin.preferredSearchKeyword('斗破苍穹 年番'), '斗破苍穹年番');
+    expect(plugin.preferredSearchKeyword('斗破苍穹 第四季'), '斗破苍穹 第四季');
+    expect(plugin.canonicalSeriesSource('/detail/10436/'), '/detail/234/');
+    expect(plugin.canonicalSeriesSource('/detail/19749/'), '/detail/19749/');
+    expect(
+      plugin.canonicalSeriesSource('https://example.org/detail/10436/'),
+      'https://example.org/detail/10436/',
+    );
+
+    plugin.baseUrl = 'https://example.org';
+    expect(plugin.preferredSearchKeyword('斗破苍穹 年番4'), '斗破苍穹 年番4');
+    expect(plugin.canonicalSeriesSource('/detail/10436/'), '/detail/10436/');
   });
 
   testWidgets('direction keys seek only after the progress bar gains focus', (

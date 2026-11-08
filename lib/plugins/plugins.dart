@@ -185,6 +185,33 @@ class Plugin {
 
   bool get requiresNewerClient => int.parse(api) > ApiEndpoints.apiLevel;
 
+  bool get _isDcc3MxDm =>
+      pluginNameKey(name) == 'mxdm' &&
+      const {'dcc3.com', 'www.dcc3.com'}.contains(Uri.tryParse(baseUrl)?.host);
+
+  String preferredSearchKeyword(String keyword) {
+    // Bangumi splits the annual series into seasons. MXdm indexes the
+    // complete series under one compact title.
+    if (_isDcc3MxDm &&
+        !usesApiSearch &&
+        RegExp(r'^斗破苍穹\s*年番(?:\s*[1-9][0-9]*)?$')
+            .hasMatch(keyword.trim())) {
+      return '斗破苍穹年番';
+    }
+    return keyword;
+  }
+
+  String canonicalSeriesSource(String source) {
+    if (!_isDcc3MxDm || chapterMode != RuleMode.xpath) return source;
+    final url = Uri.tryParse(buildFullUrl(source));
+    // The duplicate annual-series listing has only the unavailable 量子
+    // playlist. Use the complete listing for links saved in watch history.
+    if (url?.host == Uri.tryParse(baseUrl)?.host && url?.path == '/detail/10436') {
+      return '/detail/234/';
+    }
+    return source;
+  }
+
   RuleExecutionConfig get _executionConfig => RuleExecutionConfig(
         pluginName: name,
         baseUrl: baseUrl,
@@ -219,7 +246,7 @@ class Plugin {
   }) {
     return _ruleEngine.queryChapters(
       _executionConfig,
-      source,
+      canonicalSeriesSource(source),
       cancelToken: cancelToken,
     );
   }

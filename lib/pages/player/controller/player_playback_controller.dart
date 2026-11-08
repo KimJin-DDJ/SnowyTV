@@ -408,12 +408,13 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       String? videoRenderer;
+      bool isAndroidEmulator = false;
 
       if (Platform.isAndroid) {
         final String androidVideoRenderer =
             GStorage.getSetting(SettingsKeys.androidVideoRenderer);
         final isTv = await PlatformEnvironmentService.isAndroidTv();
-        final isEmu = await PlatformEnvironmentService.isEmulator();
+        isAndroidEmulator = await PlatformEnvironmentService.isEmulator();
 
         if (androidVideoRenderer == 'auto') {
           if (isTv) {
@@ -436,7 +437,7 @@ abstract class _PlayerPlaybackController with Store {
           videoRenderer = androidVideoRenderer;
         }
         KazumiLogger().d(
-            'PlayerController: Android video renderer $videoRenderer (isTv: $isTv, isEmu: $isEmu)');
+            'PlayerController: Android video renderer $videoRenderer (isTv: $isTv, isEmu: $isAndroidEmulator)');
       }
 
       if (isTvDevice) {
@@ -453,7 +454,7 @@ abstract class _PlayerPlaybackController with Store {
       final String effectiveHwdec = hAenable
           ? (Platform.isAndroid &&
                   (hardwareDecoder == 'auto' || hardwareDecoder == 'auto-safe')
-              ? 'mediacodec'
+              ? (isAndroidEmulator ? 'no' : 'mediacodec')
               : hardwareDecoder)
           : 'no';
 
