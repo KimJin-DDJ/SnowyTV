@@ -104,17 +104,24 @@ abstract class _PlayerDebugController with Store {
             : '${(val / 1000).toStringAsFixed(0)} kbps';
       }
     }
-    return '自适应最高码率';
+    return '检测中...';
   }
 
-  /// 格式化帧率：如 60 fps、24 fps
+  /// 格式化帧率：如 60 fps、23.98 fps、59.94 fps
   String get formattedFps {
     if (videoFps > 0) {
       final isInt = videoFps.truncateToDouble() == videoFps;
-      return '${isInt ? videoFps.toInt() : videoFps.toStringAsFixed(1)} fps';
+      if (isInt) return '${videoFps.toInt()} fps';
+      // 去掉小数末尾多余的 0，如 24.00 -> 24，23.50 -> 23.5
+      final text = videoFps.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+      return '$text fps';
     }
     return '';
   }
+
+  Player? _nativeStatsPlayer;
+  Timer? _liveStatsTimer;
+  bool _liveStatsInFlight = false;
 
   StreamSubscription<PlayerLog>? playerLogSubscription;
   StreamSubscription<int?>? playerWidthSubscription;
@@ -198,28 +205,61 @@ abstract class _PlayerDebugController with Store {
     });
 
     // 动态提取底层 MPV 解码参数与丢帧指标
-    unawaited(() async {
-      try {
-        final pp = player.platform as NativePlayer;
-        final fpsStr = await pp.getProperty('estimated-vf-fps');
-        if (fpsStr != null) {
-          final fpsVal = double.tryParse(fpsStr);
-          if (fpsVal != null && fpsVal > 0) videoFps = fpsVal;
-        }
-        final codecStr = await pp.getProperty('video-codec');
-        if (codecStr != null && codecStr.isNotEmpty) videoCodec = codecStr;
-        final hwdecStr = await pp.getProperty('hwdec-current');
-        if (hwdecStr != null && hwdecStr.isNotEmpty) hwdecActive = hwdecStr;
-        final dropsStr = await pp.getProperty('drop-frame-count');
-        if (dropsStr != null) {
-          final dropsVal = int.tryParse(dropsStr);
-          if (dropsVal != null) droppedFrames = dropsVal;
-        }
-      } catch (_) {}
-    }());
+    _nativeStatsPlayer = player;
+    unawaited(refreshNativeStats());
+  }
+
+  /// 读取 MPV 原生统计属性并刷新观察字段，内部异常不会向外抛出
+  Future<void> refreshNativeStats() async {
+    final player = _nativeStatsPlayer;
+    if (player == null || _liveStatsInFlight) return;
+    _liveStatsInFlight = true;
+    try {
+      final pp = player.platform as NativePlayer;
+      final fpsVal = double.tryParse(await pp.getProperty('estimated-vf-fps'));
+      if (fpsVal != null && fpsVal > 0) videoFps = fpsVal;
+      // 部分 libmpv 构建下 video-codec 为空，退回 video-format（如 h264/hevc）。
+      var codecStr = await pp.getProperty('video-codec');
+      if (codecStr.isEmpty) codecStr = await pp.getProperty('video-format');
+      if (codecStr.isNotEmpty) videoCodec = codecStr;
+      if (audioCodec.isEmpty) {
+        final audioStr = await pp.getProperty('audio-codec-name');
+        if (audioStr.isNotEmpty) audioCodec = audioStr;
+      }
+      final hwdecStr = await pp.getProperty('hwdec-current');
+      if (hwdecStr.isNotEmpty) hwdecActive = hwdecStr;
+      // 渲染丢帧 + 解码丢帧，任一读取失败时只累加另一项
+      final renderDrops = int.tryParse(await pp.getProperty('frame-drop-count'));
+      final decoderDrops =
+          int.tryParse(await pp.getProperty('decoder-frame-drop-count'));
+      if (renderDrops != null || decoderDrops != null) {
+        droppedFrames = (renderDrops ?? 0) + (decoderDrops ?? 0);
+      }
+    } catch (e) {
+      KazumiLogger().w('PlayerDebug: refresh native stats failed', error: e);
+    } finally {
+      _liveStatsInFlight = false;
+    }
+  }
+
+  /// 仅在画质检测面板打开期间调用，每秒刷新一次原生统计
+  void startLiveStats() {
+    if (_liveStatsTimer != null) return;
+    _liveStatsTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => unawaited(refreshNativeStats()),
+    );
+    unawaited(refreshNativeStats());
+  }
+
+  void stopLiveStats() {
+    _liveStatsTimer?.cancel();
+    _liveStatsTimer = null;
   }
 
   Future<void> cancel() async {
+    stopLiveStats();
+    _nativeStatsPlayer = null;
     videoFps = 0.0;
     videoCodec = '';
     audioCodec = '';

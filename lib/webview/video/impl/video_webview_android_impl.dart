@@ -79,7 +79,21 @@ class VideoWebviewAndroidImpl
     if (cleanUrl.startsWith('//')) {
       cleanUrl = 'https:$cleanUrl';
     }
+    // 部分站点把参数直接拼在 .m3u8 后面（如 xx.m3u8&t=hls），没有 '?' 会导致 404。
+    final badQuery = RegExp(r'\.m3u8&', caseSensitive: false);
+    if (!cleanUrl.contains('?') && badQuery.hasMatch(cleanUrl)) {
+      cleanUrl = cleanUrl.replaceFirst(badQuery, '.m3u8?');
+    }
+    if (_isPageUrl(cleanUrl)) {
+      // MacCMS 的 MacPlayer.Url 等字段是播放页自身地址，不是视频流；忽略后继续轮询。
+      logEventController.add('Ignored page URL from $sourceDesc: $cleanUrl');
+      KazumiLogger().d('[WebView Android] ignored page URL ($sourceDesc): $cleanUrl');
+      KazumiLogger().d('[WebView Android] ignored page URL ($sourceDesc): $cleanUrl');
+      return;
+    }
     logEventController.add('$sourceDesc: $cleanUrl');
+    KazumiLogger().i('[WebView Android] $sourceDesc: $cleanUrl');
+    KazumiLogger().i('[WebView Android] $sourceDesc: $cleanUrl');
     isIframeLoaded = true;
     isVideoSourceLoaded = true;
     videoLoadingEventController.add(false);
@@ -89,10 +103,26 @@ class VideoWebviewAndroidImpl
     notifyVideoSourceResolved(cleanUrl);
   }
 
+  String? _loadingPageUrl;
+
+  /// 播放页地址（或任意 .html/.htm 页面）不是可播放的视频流。
+  bool _isPageUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    final path = uri.path.toLowerCase();
+    if (path.endsWith('.html') || path.endsWith('.htm')) return true;
+    final page = _loadingPageUrl == null ? null : Uri.tryParse(_loadingPageUrl!);
+    return page != null &&
+        page.host == uri.host &&
+        page.path == uri.path &&
+        page.query == uri.query;
+  }
+
   @override
   Future<void> loadUrl(String url, bool useLegacyParser,
       {int offset = 0}) async {
     await unloadPage();
+    _loadingPageUrl = url;
     this.useLegacyParser = useLegacyParser;
     if (!hasInjectedScripts) {
       addJavaScriptHandlers(useLegacyParser);
@@ -269,6 +299,13 @@ class VideoWebviewAndroidImpl
 
         function _findStreamInScripts() {
           try {
+            // MacCMS 播放页把真实地址放在 player_aaaa.url（可能经过 escape/base64）
+            var _pa = window.player_aaaa; var _pu = _pa && _pa.url ? String(_pa.url) : '';
+            if (_pu && _pa.encrypt == 1) { try { _pu = unescape(_pu); } catch(e) {} }
+            if (_pu && _pa.encrypt == 2) { try { _pu = unescape(atob(_pu)); } catch(e) {} }
+            if (_pu.indexOf('http') === 0 || _pu.indexOf('//') === 0) {
+              return _pu;
+            }
             // Check global player objects
             if (window.art && window.art.option && window.art.option.url) {
               return window.art.option.url;
@@ -279,8 +316,8 @@ class VideoWebviewAndroidImpl
             if (window.player && window.player.url) {
               return window.player.url;
             }
-            if (window.MacPlayer && (window.MacPlayer.PlayUrl || window.MacPlayer.Url)) {
-              return window.MacPlayer.PlayUrl || window.MacPlayer.Url;
+            if (window.MacPlayer && window.MacPlayer.PlayUrl) {
+              return window.MacPlayer.PlayUrl;
             }
 
             // Check inline script tags
@@ -431,6 +468,13 @@ class VideoWebviewAndroidImpl
       await webviewController?.evaluateJavascript(source: """
         (function() {
           try {
+            var _pa = window.player_aaaa; var _pu = _pa && _pa.url ? String(_pa.url) : '';
+            if (_pu && _pa.encrypt == 1) { try { _pu = unescape(_pu); } catch(e) {} }
+            if (_pu && _pa.encrypt == 2) { try { _pu = unescape(atob(_pu)); } catch(e) {} }
+            if (_pu.indexOf('http') === 0 || _pu.indexOf('//') === 0) {
+              window.flutter_inappwebview.callHandler('VideoBridgeDebug', _pu);
+              return;
+            }
             if (window.art && window.art.option && window.art.option.url) {
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.art.option.url);
               return;
@@ -443,8 +487,8 @@ class VideoWebviewAndroidImpl
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.player.url);
               return;
             }
-            if (window.MacPlayer && (window.MacPlayer.PlayUrl || window.MacPlayer.Url)) {
-              window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl || window.MacPlayer.Url);
+            if (window.MacPlayer && window.MacPlayer.PlayUrl) {
+              window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl);
               return;
             }
 

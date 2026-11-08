@@ -419,12 +419,17 @@ abstract class _VideoPageController with Store implements Disposable {
     _errorMessage = message;
   }
 
+  /// 当前这一集已经尝试失败的线路（自动切线时使用）。
+  final Set<int> _failedRoads = {};
+
   Future<void> changeEpisode(
     int episode, {
     int currentRoad = 0,
     int offset = 0,
     required PlayerController playerController,
+    bool isRoadFallback = false,
   }) async {
+    if (!isRoadFallback) _failedRoads.clear();
     final session = _playbackSessions.begin();
     final selection = VideoEpisodeSelection(
       episode: episode,
@@ -702,6 +707,15 @@ abstract class _VideoPageController with Store implements Disposable {
             : bangumiItem.name,
       );
 
+      playerController.playback.onFatalOpenError = (error) {
+        if (session.isStale) return;
+        unawaited(_fallbackToNextRoad(
+          resolvedEpisode,
+          offset: offset,
+          playerController: playerController,
+          reason: '视频地址无法打开',
+        ));
+      };
       final initialized = await playerController.init(params);
       if (session.isActive && initialized) {
         playingEpisode = VideoEpisodeSelection(
@@ -716,15 +730,60 @@ abstract class _VideoPageController with Store implements Disposable {
       if (session.isStale) {
         return;
       }
-      _failLoading('视频解析超时，请重试');
+      await _fallbackToNextRoad(
+        preferredEpisode,
+        offset: offset,
+        playerController: playerController,
+        reason: '视频解析超时',
+      );
     } on VideoSourceCancelledException {
       KazumiLogger().i('VideoPageController: video URL resolution cancelled');
     } catch (e) {
       if (session.isStale) {
         return;
       }
-      _failLoading('视频解析失败：${e.toString()}');
+      await _fallbackToNextRoad(
+        preferredEpisode,
+        offset: offset,
+        playerController: playerController,
+        reason: '视频解析失败：${e.toString()}',
+      );
     }
+  }
+
+  /// 当前线路无法播放时，自动切到其它线路的同一集；全部失败才显示错误。
+  Future<void> _fallbackToNextRoad(
+    EpisodeRef failed, {
+    required int offset,
+    required PlayerController playerController,
+    required String reason,
+  }) async {
+    _failedRoads.add(failed.roadIndex);
+    KazumiLogger().w('VideoPageController: road ${failed.roadIndex + 1} '
+        'failed for ${failed.displayTitle}: $reason');
+    for (var road = 0; road < roadList.length; road++) {
+      if (_failedRoads.contains(road)) continue;
+      final labels = roadList[road].identifier;
+      final index = matchingMxdmEpisodeIndex(failed.displayTitle, labels) ??
+          (failed.listIndex - 1 < labels.length ? failed.listIndex - 1 : null);
+      if (index == null) continue;
+      if (_resolveOnlineEpisode(index + 1, road: road) == null) continue;
+      KazumiDialog.showToast(
+        message: '线路 ${failed.roadIndex + 1} 无法播放，正在切换到线路 ${road + 1}',
+      );
+      await changeEpisode(
+        index + 1,
+        currentRoad: road,
+        offset: offset,
+        playerController: playerController,
+        isRoadFallback: true,
+      );
+      return;
+    }
+    await playerController.stop();
+    _failLoading(roadList.length > 1
+        ? '$reason\n所有线路都无法播放，请在「播放来源」里换一个来源'
+        : '$reason\n这个来源只有一条线路且无法播放，请在「播放来源」里换一个来源');
   }
 
   Iterable<EpisodeRef> _mxdmCandidates(EpisodeRef preferred) sync* {

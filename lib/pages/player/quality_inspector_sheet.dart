@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
@@ -12,6 +13,9 @@ void showQualityInspectorSheet(
   required VideoPageController videoPageController,
   VoidCallback? onSwitchRoad,
 }) {
+  // 仅在面板打开期间轮询原生统计，关闭（任何方式）后立即停止
+  final debug = playerController.debug;
+  debug.startLiveStats();
   showAdaptiveBottomSheet<void>(
     context: context,
     maxHeightFactor: 0.88,
@@ -21,7 +25,7 @@ void showQualityInspectorSheet(
       videoPageController: videoPageController,
       onSwitchRoad: onSwitchRoad,
     ),
-  );
+  ).whenComplete(debug.stopLiveStats);
 }
 
 class QualityInspectorSheet extends StatelessWidget {
@@ -48,7 +52,8 @@ class QualityInspectorSheet extends StatelessWidget {
             onClose: () => Navigator.of(context).pop(),
           ),
           Expanded(
-            child: Observer(
+            child: _DpadScroll(
+              builder: (scrollController) => Observer(
               builder: (context) {
                 final debug = playerController.debug;
                 final resolution = (debug.playerWidth > 0 && debug.playerHeight > 0)
@@ -56,14 +61,18 @@ class QualityInspectorSheet extends StatelessWidget {
                     : '检测中...';
                 final qualityLabel = debug.qualityBadgeText;
                 final bitrate = debug.formattedBitrate;
-                final fps = debug.formattedFps.isNotEmpty ? debug.formattedFps : '自适应 (24-60 fps)';
-                final vCodec = debug.videoCodec.isNotEmpty ? debug.videoCodec.toUpperCase() : 'H.264 / AVC';
-                final aCodec = debug.audioCodec.isNotEmpty ? debug.audioCodec.toUpperCase() : 'AAC';
+                final fps = debug.formattedFps.isNotEmpty ? debug.formattedFps : '检测中...';
+                final vCodec = debug.videoCodec.isNotEmpty ? debug.videoCodec.toUpperCase() : '检测中...';
+                final aCodec = debug.audioCodec.isNotEmpty ? debug.audioCodec.toUpperCase() : '检测中...';
                 final hwdec = debug.hwdecActive.isNotEmpty
-                    ? (debug.hwdecActive == 'mediacodec' ? 'MediaCodec 硬件加速' : debug.hwdecActive)
-                    : 'MediaCodec 硬件加速';
-                final pixelFormat = debug.pixelFormat.isNotEmpty ? debug.pixelFormat : 'YUV420P / BT.709';
-                final drops = '${debug.droppedFrames} 帧 (100% 流畅)';
+                    ? (debug.hwdecActive == 'no'
+                        ? '软件解码 (CPU)'
+                        : debug.hwdecActive.startsWith('mediacodec')
+                            ? 'MediaCodec 硬件解码'
+                            : debug.hwdecActive)
+                    : '检测中...';
+                final pixelFormat = debug.pixelFormat.isNotEmpty ? debug.pixelFormat : '检测中...';
+                final drops = '${debug.droppedFrames} 帧';
 
                 // 当前线路名称
                 final currentRoadIndex = videoPageController.selectedEpisode.road;
@@ -72,6 +81,7 @@ class QualityInspectorSheet extends StatelessWidget {
                     : '线路 ${currentRoadIndex + 1}';
 
                 return ListView(
+                  controller: scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   children: [
                     // 1. 画质评级卡片 (Hero Card)
@@ -128,9 +138,9 @@ class QualityInspectorSheet extends StatelessWidget {
                                         color: const Color(0xFF64FFDA).withValues(alpha: 0.2),
                                         borderRadius: BorderRadius.circular(4),
                                       ),
-                                      child: const Text(
-                                        '满血输出',
-                                        style: TextStyle(
+                                      child: Text(
+                                        vCodec,
+                                        style: const TextStyle(
                                           color: Color(0xFF64FFDA),
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
@@ -303,6 +313,16 @@ class QualityInspectorSheet extends StatelessWidget {
                             ),
                             if (onSwitchRoad != null)
                               FilledButton.tonalIcon(
+                                style: ButtonStyle(
+                                  shape: WidgetStateProperty.resolveWith((states) {
+                                    return RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      side: states.contains(WidgetState.focused)
+                                          ? const BorderSide(color: Color(0xFF00E676), width: 2)
+                                          : BorderSide.none,
+                                    );
+                                  }),
+                                ),
                                 onPressed: () {
                                   Navigator.of(context).pop();
                                   onSwitchRoad!();
@@ -318,6 +338,7 @@ class QualityInspectorSheet extends StatelessWidget {
                   ],
                 );
               },
+            ),
             ),
           ),
         ],
@@ -397,4 +418,77 @@ class QualityInspectorSheet extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 让遥控器上下键可以滚动面板内容。
+/// 焦点停在滚动区域本身时，上下键直接滚动；滚到底后再按下键，
+/// 交给默认焦点移动，落到「切换线路」等按钮上。
+class _DpadScroll extends StatefulWidget {
+  const _DpadScroll({required this.builder});
+
+  final Widget Function(ScrollController controller) builder;
+
+  @override
+  State<_DpadScroll> createState() => _DpadScrollState();
+}
+
+class _DpadScrollState extends State<_DpadScroll> {
+  final _controller = ScrollController();
+  final _focusNode = FocusNode(debugLabel: 'Quality inspector scroll');
+  static const _step = 240.0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    if (!node.hasPrimaryFocus) {
+      // 焦点在「切换线路」等按钮上时，按上键回到滚动区域继续往上翻。
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        node.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    if (!_controller.hasClients) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    final down = key == LogicalKeyboardKey.arrowDown;
+    if (!down && key != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    final pos = _controller.position;
+    final atEdge = down
+        ? pos.pixels >= pos.maxScrollExtent - 1
+        : pos.pixels <= pos.minScrollExtent + 1;
+    if (atEdge) {
+      if (!down) return KeyEventResult.ignored;
+      // 滚到底后，把焦点交给面板里最后一个按钮（「切换线路」）。
+      final buttons = node.traversalDescendants
+          .where((d) => d.canRequestFocus && d.context != null)
+          .toList();
+      if (buttons.isEmpty) return KeyEventResult.ignored;
+      buttons.last.requestFocus();
+      return KeyEventResult.handled;
+    }
+    final target = (pos.pixels + (down ? _step : -_step))
+        .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    _controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+    );
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: widget.builder(_controller),
+      );
 }

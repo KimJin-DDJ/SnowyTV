@@ -412,8 +412,8 @@ class VideoWebviewImpl
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.player.url);
               return;
             }
-            if (window.MacPlayer && (window.MacPlayer.PlayUrl || window.MacPlayer.Url)) {
-              window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl || window.MacPlayer.Url);
+            if (window.MacPlayer && window.MacPlayer.PlayUrl) {
+              window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl);
               return;
             }
 

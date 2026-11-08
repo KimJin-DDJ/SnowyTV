@@ -423,6 +423,15 @@ class _PlayerItemState extends State<PlayerItem>
     if (!playerController.panel.showVideoController ||
         widget.keyboardFocus.hasPrimaryFocus) {
       if (event is KeyDownEvent && (isSelect || isVertical)) {
+        if (key == LogicalKeyboardKey.arrowUp) {
+          showQualityInspectorSheet(
+            context,
+            playerController: playerController,
+            videoPageController: videoPageController,
+            onSwitchRoad: widget.onToggleSidePanel,
+          );
+          return KeyEventResult.handled;
+        }
         if (isSelect) playerController.panel.lockPanel = false;
         showVideoController();
         WidgetsBinding.instance.addPostFrameCallback((_) {

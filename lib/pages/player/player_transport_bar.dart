@@ -106,20 +106,65 @@ class PlayerTransportBar extends StatelessWidget {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                children: [
-                  playPause,
-                  ?episodes,
-                  nextEpisode,
-                  if (timePlacement ==
-                      PlayerTimeLabelPlacement.afterPlaybackButtons)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 10),
-                      child: timeLabel,
-                    ),
-                  Expanded(child: controls),
-                  fullscreen,
-                ],
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyUpEvent) return KeyEventResult.ignored;
+                  final key = event.logicalKey;
+                  if (key == LogicalKeyboardKey.arrowRight ||
+                      key == LogicalKeyboardKey.arrowLeft) {
+                    final focused = FocusManager.instance.primaryFocus;
+                    if (focused != null && node.hasFocus) {
+                      // 按屏幕上的水平位置排序，只保留这一行内可见的按钮。
+                      // 树顺序里混有全屏/隐藏节点，按树顺序跳会让焦点掉出控制栏。
+                      final rowRect = node.rect.inflate(2);
+                      final inRow = node.traversalDescendants.where((d) {
+                        if (d.context == null || !d.canRequestFocus) {
+                          return false;
+                        }
+                        final r = d.rect;
+                        return r.width > 0 &&
+                            r.height > 0 &&
+                            rowRect.contains(r.center) &&
+                            r.height <= rowRect.height;
+                      }).toList();
+                      final candidates = inRow
+                          .where((c) => !inRow.any(
+                              (o) => o != c && o.ancestors.contains(c)))
+                          .toList()
+                        ..sort((a, b) =>
+                            a.rect.center.dx.compareTo(b.rect.center.dx));
+                      final index = candidates.indexWhere(
+                        (d) => d == focused || focused.ancestors.contains(d),
+                      );
+                      if (index != -1) {
+                        final next = key == LogicalKeyboardKey.arrowRight
+                            ? index + 1
+                            : index - 1;
+                        if (next >= 0 && next < candidates.length) {
+                          candidates[next].requestFocus();
+                        }
+                        // 到达两端时停住，避免按键落到快进/快退。
+                        return KeyEventResult.handled;
+                      }
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Row(
+                  children: [
+                    playPause,
+                    ?episodes,
+                    nextEpisode,
+                    if (timePlacement ==
+                        PlayerTimeLabelPlacement.afterPlaybackButtons)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 10),
+                        child: timeLabel,
+                      ),
+                    Expanded(child: controls),
+                    fullscreen,
+                  ],
+                ),
               ),
             ),
             if (timePlacement != PlayerTimeLabelPlacement.aboveProgress)

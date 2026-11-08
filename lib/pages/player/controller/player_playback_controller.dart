@@ -90,6 +90,9 @@ abstract class _PlayerPlaybackController with Store {
   /// 历史记录传入的 offset
   int startOffset = 0;
 
+  /// 打开视频流失败（地址失效、403、格式无法识别）时回调，用于自动切换线路。
+  void Function(String error)? onFatalOpenError;
+
   /// 当前超分辨率模式
   @observable
   SuperResolutionMode superResolutionMode = SuperResolutionMode.off;
@@ -275,9 +278,8 @@ abstract class _PlayerPlaybackController with Store {
     int? hlsBitrateLimit,
   }) async {
     startOffset = offset;
-    superResolutionMode = SuperResolutionMode.fromStorageValue(
-      GStorage.getSetting(SettingsKeys.defaultSuperResolutionMode),
-    );
+    // 超分辨率 (Anime4K 着色器) 对 Chromecast HD 的 Mali-G31 负担过重，已移除入口并强制关闭。
+    superResolutionMode = SuperResolutionMode.off;
     hAenable = GStorage.getSetting(SettingsKeys.hAenable);
     androidEnableOpenSLES =
         GStorage.getSetting(SettingsKeys.androidEnableOpenSLES);
@@ -355,6 +357,12 @@ abstract class _PlayerPlaybackController with Store {
         } catch (e) {
           KazumiLogger().w('Player: failed to setProperty $key=$value: $e');
         }
+      }
+
+      // 不少 HLS 源把 TS 分片伪装成 .jpg/.png，新版 FFmpeg 默认会拒绝这类扩展名。
+      await safeSetProperty('demuxer-lavf-o', 'extension_picky=0');
+      if (!isCurrentPlayer(player)) {
+        return await _discardIfNotCurrent(candidate);
       }
 
       // ===== 动漫画质与性能平衡优化配置 =====
@@ -492,7 +500,15 @@ abstract class _PlayerPlaybackController with Store {
           }
         }
         KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
-            error: event);
+            error: event);        final text = event.toString();
+        final isOpenFailure = text.contains('Failed to open') ||
+            text.contains('Failed to recognize file format') ||
+            text.contains('loading failed');
+        if (isCurrentPlayer(player) &&
+            isOpenFailure &&
+            duration == Duration.zero) {
+          onFatalOpenError?.call(text);
+        }
       });
 
       if (superResolutionMode != SuperResolutionMode.off) {

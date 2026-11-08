@@ -622,13 +622,6 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     onSelected: widget.setPlaybackSpeed,
   );
 
-  List<Widget> get _superResolutionItems => _choiceItems(
-    SuperResolutionMode.values,
-    label: (value) => value.label,
-    selected: (value) => value == playerController.playback.superResolutionMode,
-    onSelected: widget.handleSuperResolutionChange,
-  );
-
   Widget _menuButton({
     required Widget child,
     required List<Widget> items,
@@ -682,9 +675,10 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         ),
         if (playerController.danmaku.danmakuOn) ...[
           _danmakuSettingsButton,
-          Expanded(child: _danmakuTextField),
-        ] else
-          const Spacer(),
+          if (widget.tvPlayPauseFocus == null)
+            Expanded(child: _danmakuTextField),
+        ],
+        const Spacer(),
       ],
       Observer(
         builder: (context) => TextButton.icon(
@@ -726,10 +720,6 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
             onSwitchRoad: widget.onToggleSidePanel,
           ),
         ),
-      ),
-      _menuButton(
-        child: const Text('超分辨率', style: TextStyle(color: Colors.white)),
-        items: _superResolutionItems,
       ),
       _menuButton(
         child: Text(
@@ -898,45 +888,56 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                                 final label =
                                     playerController.debug.qualityBadgeText;
                                 final fps = playerController.debug.formattedFps;
-                                return InkWell(
-                                  borderRadius: BorderRadius.circular(6),
-                                  onTap: () => showQualityInspectorSheet(
-                                    context,
-                                    playerController: playerController,
-                                    videoPageController: videoPageController,
-                                    onSwitchRoad: widget.onToggleSidePanel,
-                                  ),
-                                  child: Container(
-                                    margin: const EdgeInsets.only(left: 10),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0x3300E676),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(
-                                        color: const Color(0x8800E676),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(
-                                          Icons.lens,
-                                          color: Color(0xFF00E676),
-                                          size: 6,
+                                return Focus(
+                                  child: Builder(
+                                    builder: (context) {
+                                      final isFocused = Focus.of(context).hasFocus;
+                                      return InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        onTap: () => showQualityInspectorSheet(
+                                          context,
+                                          playerController: playerController,
+                                          videoPageController: videoPageController,
+                                          onSwitchRoad: widget.onToggleSidePanel,
                                         ),
-                                        const SizedBox(width: 5),
-                                        Text(
-                                          fps.isNotEmpty ? '$label · $fps' : label,
-                                          style: const TextStyle(
-                                            color: Color(0xFF69F0AE),
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
+                                        child: Container(
+                                          margin: const EdgeInsets.only(left: 10),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: isFocused
+                                                ? const Color(0x6600E676)
+                                                : const Color(0x3300E676),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: isFocused
+                                                  ? const Color(0xFF00E676)
+                                                  : const Color(0x8800E676),
+                                              width: isFocused ? 2 : 1,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.lens,
+                                                color: Color(0xFF00E676),
+                                                size: 6,
+                                              ),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                fps.isNotEmpty ? '$label · $fps' : label,
+                                                style: const TextStyle(
+                                                  color: Color(0xFF69F0AE),
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      ],
-                                    ),
+                                      );
+                                    },
                                   ),
                                 );
                               },
@@ -1001,10 +1002,6 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     SubmenuButton(
                       menuChildren: _speedItems,
                       child: const Text('倍速'),
-                    ),
-                    SubmenuButton(
-                      menuChildren: _superResolutionItems,
-                      child: const Text('超分辨率'),
                     ),
                     _syncPlayMenuItem,
                   ],

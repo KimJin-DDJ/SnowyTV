@@ -143,4 +143,59 @@ void main() {
     expect(seekSteps, [1, -1]);
     expect(shortcutCount, 0);
   });
+
+  testWidgets(
+    'PlayerTransportBar navigates across wide controls with arrow keys',
+    (tester) async {
+      final playFocus = FocusNode();
+      final qualityFocus = FocusNode();
+      addTearDown(playFocus.dispose);
+      addTearDown(qualityFocus.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 960,
+              child: PlayerTransportBar(
+                compact: false,
+                playPause: TextButton(
+                  focusNode: playFocus,
+                  autofocus: true,
+                  onPressed: () {},
+                  child: const Text('播放'),
+                ),
+                nextEpisode: const SizedBox.shrink(),
+                progressBuilder: (_) => const SizedBox(height: 20),
+                timeLabel: const Text('0:00'),
+                timePlacement: PlayerTimeLabelPlacement.besideProgress,
+                controls: Row(
+                  children: [
+                    const Text('弹幕'),
+                    const Spacer(),
+                    TextButton(
+                      focusNode: qualityFocus,
+                      onPressed: () {},
+                      child: const Text('1080P'),
+                    ),
+                  ],
+                ),
+                fullscreen: const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(playFocus.hasPrimaryFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(qualityFocus.hasPrimaryFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(playFocus.hasPrimaryFocus, isTrue);
+    },
+  );
 }

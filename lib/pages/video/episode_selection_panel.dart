@@ -73,7 +73,9 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
       return;
     }
 
-    final index = widget.selectedEpisode - 1;
+    // 列表按最新一集在前倒序显示。
+    final index = widget.roads[widget.selectedRoad].data.length -
+        widget.selectedEpisode;
     final toolbarHeight = _toolbarHeight;
     final item = _observerController.observeItem(index: index);
     if (item != null) {
@@ -221,11 +223,13 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                     sliver: SliverList.builder(
                       itemCount: count,
                       itemBuilder: (context, index) {
-                        final episode = index + 1;
+                        // 倒序：最新一集排在最上面。
+                        final dataIndex = count - 1 - index;
+                        final episode = dataIndex + 1;
                         final name =
-                            index < road!.identifier.length &&
-                                road.identifier[index].trim().isNotEmpty
-                            ? road.identifier[index]
+                            dataIndex < road!.identifier.length &&
+                                road.identifier[dataIndex].trim().isNotEmpty
+                            ? road.identifier[dataIndex]
                             : '第$episode集';
                         final selected =
                             _visibleRoad == widget.selectedRoad &&
@@ -239,7 +243,7 @@ class EpisodeSelectionPanelState extends State<EpisodeSelectionPanel> {
                           focusNode: selected ? _currentEpisodeFocus : null,
                           isPlaying: widget.isPlaying,
                           isOffline: widget.isOffline,
-                          download: widget.downloads[road.data[index]],
+                          download: widget.downloads[road.data[dataIndex]],
                           disableAnimations: widget.disableAnimations,
                           onTap: () =>
                               widget.onEpisodeSelected(episode, _visibleRoad),
