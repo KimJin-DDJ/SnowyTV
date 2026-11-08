@@ -4,6 +4,7 @@ import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:kazumi/bean/dialog/material_bottom_sheet.dart';
 import 'package:kazumi/bean/widget/tonal_card.dart';
+import 'package:kazumi/bean/widget/tv_focus_overlay.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 
@@ -436,6 +437,13 @@ class _DpadScrollState extends State<_DpadScroll> {
   final _controller = ScrollController();
   final _focusNode = FocusNode(debugLabel: 'Quality inspector scroll');
   static const _step = 240.0;
+
+  @override
+  void initState() {
+    super.initState();
+    // 滚动区域本身只是接收上下键，不是可操作的按钮，不画焦点框。
+    TvFocusOverlay.excludeFrame(_focusNode);
+  }
 
   @override
   void dispose() {

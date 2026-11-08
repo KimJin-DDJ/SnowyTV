@@ -14,6 +14,12 @@ import 'package:flutter/services.dart';
 class TvFocusOverlay extends StatefulWidget {
   const TvFocusOverlay({super.key, required this.child});
 
+  /// 不画焦点框的节点（比如只负责接收上下键滚动的容器）。
+  static final Expando<bool> _noFrame = Expando<bool>('TvFocusOverlay.noFrame');
+
+  /// 标记 [node] 获得焦点时不画描边框。
+  static void excludeFrame(FocusNode node) => _noFrame[node] = true;
+
   final Widget child;
 
   @override
@@ -89,7 +95,8 @@ class _TvFocusOverlayState extends State<TvFocusOverlay> {
         // 整页大小的焦点（比如播放器的快捷键区域、页面级 FocusScope）不画框
         final tooBig =
             rect.width * rect.height > screen.width * screen.height * 0.6;
-        if (!tooBig && !rect.isEmpty && rect.isFinite) {
+        final excluded = TvFocusOverlay._noFrame[node] == true;
+        if (!excluded && !tooBig && !rect.isEmpty && rect.isFinite) {
           next = rect;
         }
       }
@@ -125,14 +132,9 @@ class _TvFocusOverlayState extends State<TvFocusOverlay> {
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     border: Border.all(color: color, width: 3),
+                    // 只描边不填充：BoxShadow 会把整块区域涂成半透明主题色，
+                    // 而且模糊阴影对 Mali-G31 也是额外开销。
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withValues(alpha: 0.45),
-                        blurRadius: 14,
-                        spreadRadius: 1,
-                      ),
-                    ],
                   ),
                 ),
               ),

@@ -422,6 +422,17 @@ class _PlayerItemState extends State<PlayerItem>
     }
     if (!playerController.panel.showVideoController ||
         widget.keyboardFocus.hasPrimaryFocus) {
+      // 全屏播放、没有选中任何控件时，左右键直接快退 / 快进，
+      // 同时呼出控制栏让用户看到进度（焦点不动，继续按左右仍然是调进度）。
+      if (!isSelect && !isVertical) {
+        if (event is! KeyUpEvent && _allowTvSeekStep(event)) {
+          showVideoController();
+          unawaited(
+            _seekWithTvRemote(key == LogicalKeyboardKey.arrowLeft ? -1 : 1),
+          );
+        }
+        return KeyEventResult.handled;
+      }
       if (event is KeyDownEvent && (isSelect || isVertical)) {
         if (key == LogicalKeyboardKey.arrowUp) {
           showQualityInspectorSheet(
@@ -444,6 +455,20 @@ class _PlayerItemState extends State<PlayerItem>
     }
     if (event is! KeyUpEvent) showVideoController();
     return KeyEventResult.ignored;
+  }
+
+  DateTime _lastTvSeekRepeat = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 长按左右键时限制连续跳转频率，避免在 Chromecast 上堆积大量 seek。
+  bool _allowTvSeekStep(KeyEvent event) {
+    final now = DateTime.now();
+    if (event is KeyRepeatEvent &&
+        now.difference(_lastTvSeekRepeat) <
+            const Duration(milliseconds: 250)) {
+      return false;
+    }
+    _lastTvSeekRepeat = now;
+    return true;
   }
 
   Future<void> _seekWithTvRemote(int direction) async {
