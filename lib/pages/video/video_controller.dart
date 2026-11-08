@@ -619,6 +619,16 @@ abstract class _VideoPageController with Store implements Disposable {
       final bool forceAdBlocker =
           GStorage.getSetting(SettingsKeys.forceAdBlocker);
 
+      final String effectiveReferer = currentPlugin.referer.isNotEmpty
+          ? currentPlugin.referer
+          : (currentPlugin.baseUrl.isNotEmpty
+              ? (currentPlugin.baseUrl.endsWith('/')
+                  ? currentPlugin.baseUrl
+                  : '${currentPlugin.baseUrl}/')
+              : (resolvedEpisode.pageUrl.isNotEmpty
+                  ? resolvedEpisode.pageUrl
+                  : ''));
+
       final params = PlaybackInitParams(
         videoUrl: source.url,
         offset: source.offset,
@@ -634,12 +644,11 @@ abstract class _VideoPageController with Store implements Disposable {
           'user-agent': currentPlugin.userAgent.isEmpty
               ? getRandomUA()
               : currentPlugin.userAgent,
-          if (currentPlugin.referer.isNotEmpty)
-            'referer': currentPlugin.referer,
+          if (effectiveReferer.isNotEmpty) 'referer': effectiveReferer,
         },
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
-        referer: currentPlugin.referer,
+        referer: effectiveReferer,
         currentRoad: resolvedEpisode.roadIndex,
         coverUrl: bangumiItem.images['large'],
         bangumiName: bangumiItem.nameCn.isNotEmpty

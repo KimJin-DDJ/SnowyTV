@@ -36,6 +36,86 @@ abstract class _PlayerDebugController with Store {
   @observable
   String playerVideoBitrate = '';
 
+  final Observable<double> _videoFps = Observable(0.0);
+  double get videoFps => _videoFps.value;
+  set videoFps(double v) => runInAction(() => _videoFps.value = v);
+
+  final Observable<String> _videoCodec = Observable('');
+  String get videoCodec => _videoCodec.value;
+  set videoCodec(String v) => runInAction(() => _videoCodec.value = v);
+
+  final Observable<String> _audioCodec = Observable('');
+  String get audioCodec => _audioCodec.value;
+  set audioCodec(String v) => runInAction(() => _audioCodec.value = v);
+
+  final Observable<String> _pixelFormat = Observable('');
+  String get pixelFormat => _pixelFormat.value;
+  set pixelFormat(String v) => runInAction(() => _pixelFormat.value = v);
+
+  final Observable<String> _hwdecActive = Observable('');
+  String get hwdecActive => _hwdecActive.value;
+  set hwdecActive(String v) => runInAction(() => _hwdecActive.value = v);
+
+  final Observable<int> _droppedFrames = Observable(0);
+  int get droppedFrames => _droppedFrames.value;
+  set droppedFrames(int v) => runInAction(() => _droppedFrames.value = v);
+
+  /// 简短画质徽章标签：如 1080P、2K、4K、720P
+  String get qualityShortLabel {
+    if (playerWidth <= 0 || playerHeight <= 0) return '检测中';
+    final minDim = playerWidth > playerHeight ? playerHeight : playerWidth;
+    final maxDim = playerWidth > playerHeight ? playerWidth : playerHeight;
+    if (minDim >= 2000 || maxDim >= 3800) return '4K';
+    if (minDim >= 1350) return '2K';
+    if (minDim >= 900 || maxDim >= 1800) return '1080P';
+    if (minDim >= 650 || maxDim >= 1200) return '720P';
+    if (minDim >= 400 || maxDim >= 800) return '480P';
+    return '${minDim}P';
+  }
+
+  /// 完整画质等级描述：如 1080P 宽银幕、1080P 高清、4K 极清
+  String get qualityBadgeText {
+    if (playerWidth <= 0 || playerHeight <= 0) return '检测画质...';
+    final minDim = playerWidth > playerHeight ? playerHeight : playerWidth;
+    final maxDim = playerWidth > playerHeight ? playerWidth : playerHeight;
+    final isUltrawide = (maxDim / minDim) >= 2.0;
+
+    if (minDim >= 2000 || maxDim >= 3800) {
+      return isUltrawide ? '4K 宽银幕' : '4K 极清';
+    }
+    if (minDim >= 1350) {
+      return isUltrawide ? '2K 宽银幕' : '2K 超清';
+    }
+    if (minDim >= 900 || maxDim >= 1800) {
+      return isUltrawide ? '1080P 宽银幕' : '1080P 高清';
+    }
+    if (minDim >= 650 || maxDim >= 1200) return '720P 标清';
+    if (minDim >= 400 || maxDim >= 800) return '480P 流畅';
+    return '${minDim}P';
+  }
+
+  /// 格式化码率：如 3.2 Mbps、1850 kbps
+  String get formattedBitrate {
+    if (playerVideoBitrate.isNotEmpty) {
+      final val = double.tryParse(playerVideoBitrate);
+      if (val != null && val > 0) {
+        return val >= 1000000
+            ? '${(val / 1000000).toStringAsFixed(1)} Mbps'
+            : '${(val / 1000).toStringAsFixed(0)} kbps';
+      }
+    }
+    return '自适应最高码率';
+  }
+
+  /// 格式化帧率：如 60 fps、24 fps
+  String get formattedFps {
+    if (videoFps > 0) {
+      final isInt = videoFps.truncateToDouble() == videoFps;
+      return '${isInt ? videoFps.toInt() : videoFps.toStringAsFixed(1)} fps';
+    }
+    return '';
+  }
+
   StreamSubscription<PlayerLog>? playerLogSubscription;
   StreamSubscription<int?>? playerWidthSubscription;
   StreamSubscription<int?>? playerHeightSubscription;
@@ -73,6 +153,11 @@ abstract class _PlayerDebugController with Store {
     if (!isCurrentPlayer(player)) return;
     playerVideoParamsSubscription = player.stream.videoParams.listen((event) {
       playerVideoParams = event.toString();
+      if (event.w != null && event.w! > 0) playerWidth = event.w!;
+      if (event.h != null && event.h! > 0) playerHeight = event.h!;
+      if (event.pixelformat != null && event.pixelformat!.isNotEmpty) {
+        pixelFormat = event.pixelformat!;
+      }
     });
     await playerAudioParamsSubscription?.cancel();
     if (!isCurrentPlayer(player)) return;
@@ -89,6 +174,17 @@ abstract class _PlayerDebugController with Store {
     playerTracksSubscription = player.stream.track.listen((event) {
       playerAudioTracks = event.audio.toString();
       playerVideoTracks = event.video.toString();
+      final v = event.video;
+      if (v != null) {
+        if (v.fps != null && v.fps! > 0) videoFps = v.fps!;
+        if (v.codec != null && v.codec!.isNotEmpty) videoCodec = v.codec!;
+        if (v.w != null && v.w! > 0) playerWidth = v.w!;
+        if (v.h != null && v.h! > 0) playerHeight = v.h!;
+      }
+      final a = event.audio;
+      if (a != null && a.codec != null && a.codec!.isNotEmpty) {
+        audioCodec = a.codec!;
+      }
     });
     await playerAudioBitrateSubscription?.cancel();
     if (!isCurrentPlayer(player)) return;
@@ -100,9 +196,36 @@ abstract class _PlayerDebugController with Store {
     playerVideoBitrateSubscription = player.stream.videoBitrate.listen((event) {
       playerVideoBitrate = event.toString();
     });
+
+    // 动态提取底层 MPV 解码参数与丢帧指标
+    unawaited(() async {
+      try {
+        final pp = player.platform as NativePlayer;
+        final fpsStr = await pp.getProperty('estimated-vf-fps');
+        if (fpsStr != null) {
+          final fpsVal = double.tryParse(fpsStr);
+          if (fpsVal != null && fpsVal > 0) videoFps = fpsVal;
+        }
+        final codecStr = await pp.getProperty('video-codec');
+        if (codecStr != null && codecStr.isNotEmpty) videoCodec = codecStr;
+        final hwdecStr = await pp.getProperty('hwdec-current');
+        if (hwdecStr != null && hwdecStr.isNotEmpty) hwdecActive = hwdecStr;
+        final dropsStr = await pp.getProperty('drop-frame-count');
+        if (dropsStr != null) {
+          final dropsVal = int.tryParse(dropsStr);
+          if (dropsVal != null) droppedFrames = dropsVal;
+        }
+      } catch (_) {}
+    }());
   }
 
   Future<void> cancel() async {
+    videoFps = 0.0;
+    videoCodec = '';
+    audioCodec = '';
+    pixelFormat = '';
+    hwdecActive = '';
+    droppedFrames = 0;
     // Detach fields before awaiting so a new player cannot lose its listeners.
     final logSubscription = playerLogSubscription;
     final widthSubscription = playerWidthSubscription;

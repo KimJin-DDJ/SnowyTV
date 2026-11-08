@@ -27,6 +27,7 @@ import 'package:kazumi/services/player/timed_shutdown_service.dart';
 import 'package:kazumi/utils/format.dart';
 import 'package:kazumi/pages/player/player_transport_bar.dart';
 import 'package:kazumi/pages/player/player_screenshot_controls.dart';
+import 'package:kazumi/pages/player/quality_inspector_sheet.dart';
 
 class PlayerItemPanel extends StatefulWidget {
   const PlayerItemPanel({
@@ -685,6 +686,32 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         ] else
           const Spacer(),
       ],
+      Observer(
+        builder: (context) => TextButton.icon(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          ),
+          icon: const Icon(
+            Icons.high_quality_rounded,
+            color: Color(0xFF64FFDA),
+            size: 20,
+          ),
+          label: Text(
+            playerController.debug.qualityShortLabel,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+          onPressed: () => showQualityInspectorSheet(
+            context,
+            playerController: playerController,
+            videoPageController: videoPageController,
+            onSwitchRoad: widget.onToggleSidePanel,
+          ),
+        ),
+      ),
       _menuButton(
         child: const Text('超分辨率', style: TextStyle(color: Colors.white)),
         items: _superResolutionItems,
@@ -836,16 +863,61 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 child: dtb.DragToMoveArea(
                   child: compact
                       ? const SizedBox(height: 40)
-                      : Text(
-                          ' ${videoPageController.title} [${videoPageController.roadList[videoPageController.selectedEpisode.road].identifier[videoPageController.selectedEpisode.episode - 1]}]',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: Theme.of(context)
-                                .textTheme
-                                .titleMedium!
-                                .fontSize,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                      : Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                ' ${videoPageController.title} [${videoPageController.roadList[videoPageController.selectedEpisode.road].identifier[videoPageController.selectedEpisode.episode - 1]}]',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium!
+                                      .fontSize,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            Observer(
+                              builder: (context) {
+                                final label =
+                                    playerController.debug.qualityBadgeText;
+                                final fps = playerController.debug.formattedFps;
+                                return Container(
+                                  margin: const EdgeInsets.only(left: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0x3300E676),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: const Color(0x8800E676),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.lens,
+                                        color: Color(0xFF00E676),
+                                        size: 6,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        fps.isNotEmpty ? '$label · $fps' : label,
+                                        style: const TextStyle(
+                                          color: Color(0xFF69F0AE),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
                 ),
               ),
@@ -917,6 +989,15 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     label: '弹幕切换',
                   ),
                   if (compact) _danmakuSettingsMenuItem,
+                  KazumiMenuItem(
+                    onPressed: () => showQualityInspectorSheet(
+                      context,
+                      playerController: playerController,
+                      videoPageController: videoPageController,
+                      onSwitchRoad: widget.onToggleSidePanel,
+                    ),
+                    label: '画质检测与规格',
+                  ),
                   KazumiMenuItem(
                     onPressed: widget.showVideoInfo,
                     label: '视频详情',

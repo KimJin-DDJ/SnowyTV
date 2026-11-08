@@ -261,9 +261,14 @@ class Plugin {
 
   /// Headers used when resolving or downloading the final media resource.
   Map<String, String> buildHttpHeaders() {
+    final effectiveReferer = referer.isNotEmpty
+        ? referer
+        : (baseUrl.isNotEmpty
+            ? (baseUrl.endsWith('/') ? baseUrl : '$baseUrl/')
+            : '');
     return {
       'user-agent': userAgent.isEmpty ? getRandomUA() : userAgent,
-      if (referer.isNotEmpty) 'referer': referer,
+      if (effectiveReferer.isNotEmpty) 'referer': effectiveReferer,
     };
   }
 }

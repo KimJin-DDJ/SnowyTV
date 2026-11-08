@@ -348,6 +348,28 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
+      // ===== 动漫画质与性能平衡优化配置 =====
+      // 1. 强制锁定最高码率分支（保障 75 寸大屏获得 3.0 Mbps 最高细节原画）
+      await pp.setProperty("hls-bitrate", "max");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+      await pp.setProperty("ytdl-format", "bestvideo+bestaudio/best");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+
+      // 2. 动画帧率精准同步（消除 24/60fps 帧率失配微抖，保证 60Hz 输出丝滑）
+      await pp.setProperty("video-sync", "audio");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+
+      // 3. 避免在低功耗电视盒子（如 Mali-G31 GPU）上执行重型 GPU 着色器，
+      //    保证硬件解码直通，由大屏电视内部专用芯片做 4K 硬件升频。
+      await pp.setProperty("deband", "no");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+      await pp.setProperty("scale", "bilinear");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+      await pp.setProperty("cscale", "bilinear");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+      await pp.setProperty("dscale", "bilinear");
+      if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
+
       final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
       if (proxyEnable) {
         final String proxyUrl = GStorage.getSetting(SettingsKeys.proxyUrl);
@@ -378,7 +400,6 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       String? videoRenderer;
-      bool forceSoftwareDecodingInEmulator = false;
 
       if (Platform.isAndroid) {
         final String androidVideoRenderer =
@@ -387,14 +408,10 @@ abstract class _PlayerPlaybackController with Store {
         final isEmu = await PlatformEnvironmentService.isEmulator();
 
         if (androidVideoRenderer == 'auto') {
-          if (isTv && !isEmu) {
-            // 真机 Android TV (Chromecast with Google TV 等):
-            // 必须使用 mediacodec_embed 原生硬件直通直显，避免 vo=gpu 纹理拷贝导致的 10fps 掉帧与卡顿
+          if (isTv) {
+            // Android TV 设备 (真机与 Google TV 模拟器):
+            // 采用 mediacodec_embed 原生硬件直显直通，零掉帧、低发热
             videoRenderer = 'mediacodec_embed';
-          } else if (isEmu) {
-            // 模拟器环境: 强制使用 gpu 配合软解，防止 Host OpenGL EGL 跨线程上下文崩溃闪退
-            videoRenderer = 'gpu';
-            forceSoftwareDecodingInEmulator = true;
           } else {
             final int androidSdkVersion =
                 await PlatformEnvironmentService.getAndroidSdkVersion();
@@ -406,9 +423,6 @@ abstract class _PlayerPlaybackController with Store {
           }
         } else {
           videoRenderer = androidVideoRenderer;
-          if (isEmu && videoRenderer == 'gpu') {
-            forceSoftwareDecodingInEmulator = true;
-          }
         }
         KazumiLogger().d(
             'PlayerController: Android video renderer $videoRenderer (isTv: $isTv, isEmu: $isEmu)');
@@ -418,9 +432,6 @@ abstract class _PlayerPlaybackController with Store {
         hAenable = true;
         hardwareDecoder = 'mediacodec';
         superResolutionMode = SuperResolutionMode.off;
-      } else if (forceSoftwareDecodingInEmulator) {
-        hAenable = false;
-        hardwareDecoder = 'no';
       }
 
       videoController ??= VideoController(
