@@ -348,26 +348,34 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
+      Future<void> safeSetProperty(String key, String value) async {
+        try {
+          await pp.setProperty(key, value);
+        } catch (e) {
+          KazumiLogger().w('Player: failed to setProperty $key=$value: $e');
+        }
+      }
+
       // ===== 动漫画质与性能平衡优化配置 =====
-      // 1. 强制锁定最高码率分支（保障 75 寸大屏获得 3.0 Mbps 最高细节原画）
-      await pp.setProperty("hls-bitrate", "max");
+      // 1. 强制锁定最高码率分支（保障 75 寸大屏获得最高细节原画）
+      await safeSetProperty("hls-bitrate", "max");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
-      await pp.setProperty("ytdl-format", "bestvideo+bestaudio/best");
+      await safeSetProperty("ytdl-format", "bestvideo+bestaudio/best");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
 
       // 2. 动画帧率精准同步（消除 24/60fps 帧率失配微抖，保证 60Hz 输出丝滑）
-      await pp.setProperty("video-sync", "audio");
+      await safeSetProperty("video-sync", "audio");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
 
       // 3. 避免在低功耗电视盒子（如 Mali-G31 GPU）上执行重型 GPU 着色器，
       //    保证硬件解码直通，由大屏电视内部专用芯片做 4K 硬件升频。
-      await pp.setProperty("deband", "no");
+      await safeSetProperty("deband", "no");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
-      await pp.setProperty("scale", "bilinear");
+      await safeSetProperty("scale", "bilinear");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
-      await pp.setProperty("cscale", "bilinear");
+      await safeSetProperty("cscale", "bilinear");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
-      await pp.setProperty("dscale", "bilinear");
+      await safeSetProperty("dscale", "bilinear");
       if (!isCurrentPlayer(player)) return await _discardIfNotCurrent(candidate);
 
       final bool proxyEnable = GStorage.getSetting(SettingsKeys.proxyEnable);
@@ -409,9 +417,12 @@ abstract class _PlayerPlaybackController with Store {
 
         if (androidVideoRenderer == 'auto') {
           if (isTv) {
-            // Android TV 设备 (真机与 Google TV 模拟器):
-            // 采用 mediacodec_embed 原生硬件直显直通，零掉帧、低发热
-            videoRenderer = 'mediacodec_embed';
+            // Android TV 设备 (Chromecast with Google TV / 电视盒子等):
+            // 采用稳健的 vo=gpu 纹理渲染（支持 MediaCodec 硬件加速解码）。
+            // 严禁强制使用 mediacodec_embed，因为 mediacodec_embed 原生 Surface 在电视芯片上
+            // 存在严重的 Surface 合成遮挡 bug，且遇非标宽高/码流超限时无法兜底软解，导致黑屏只有声音或闪退。
+            // 使用 gpu 模式既能享受 60fps MediaCodec 硬件加速，又具备 FFmpeg 软解兜底能力。
+            videoRenderer = 'gpu';
           } else {
             final int androidSdkVersion =
                 await PlatformEnvironmentService.getAndroidSdkVersion();
@@ -428,11 +439,23 @@ abstract class _PlayerPlaybackController with Store {
             'PlayerController: Android video renderer $videoRenderer (isTv: $isTv, isEmu: $isEmu)');
       }
 
+      if (isTvDevice) {
+        // 在 Android TV 上默认关闭 GPU 超分滤镜，防止 Mali 低功耗 GPU 负载过载掉帧
+        superResolutionMode = SuperResolutionMode.off;
+      }
+
       if (videoRenderer == 'mediacodec_embed') {
         hAenable = true;
         hardwareDecoder = 'mediacodec';
         superResolutionMode = SuperResolutionMode.off;
       }
+
+      final String effectiveHwdec = hAenable
+          ? (Platform.isAndroid &&
+                  (hardwareDecoder == 'auto' || hardwareDecoder == 'auto-safe')
+              ? 'mediacodec'
+              : hardwareDecoder)
+          : 'no';
 
       videoController ??= VideoController(
         player,
@@ -440,7 +463,7 @@ abstract class _PlayerPlaybackController with Store {
           vo: videoRenderer,
           enableHardwareAcceleration: hAenable,
           enableAndroidSurfaceProducer: false,
-          hwdec: hAenable ? hardwareDecoder : 'no',
+          hwdec: effectiveHwdec,
           androidAttachSurfaceAfterVideoParameters: false,
         ),
       );

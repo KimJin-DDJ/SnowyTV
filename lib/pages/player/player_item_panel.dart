@@ -688,9 +688,24 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
       ],
       Observer(
         builder: (context) => TextButton.icon(
-          style: TextButton.styleFrom(
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          style: ButtonStyle(
+            foregroundColor: WidgetStateProperty.all(Colors.white),
+            padding: WidgetStateProperty.all(
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6)),
+            shape: WidgetStateProperty.resolveWith((states) {
+              return RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: states.contains(WidgetState.focused)
+                    ? const BorderSide(color: Color(0xFF00E676), width: 2)
+                    : BorderSide.none,
+              );
+            }),
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.focused)) {
+                return const Color(0x3300E676);
+              }
+              return Colors.transparent;
+            }),
           ),
           icon: const Icon(
             Icons.high_quality_rounded,
@@ -883,36 +898,45 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                                 final label =
                                     playerController.debug.qualityBadgeText;
                                 final fps = playerController.debug.formattedFps;
-                                return Container(
-                                  margin: const EdgeInsets.only(left: 10),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0x3300E676),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: const Color(0x8800E676),
-                                      width: 1,
-                                    ),
+                                return InkWell(
+                                  borderRadius: BorderRadius.circular(6),
+                                  onTap: () => showQualityInspectorSheet(
+                                    context,
+                                    playerController: playerController,
+                                    videoPageController: videoPageController,
+                                    onSwitchRoad: widget.onToggleSidePanel,
                                   ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.lens,
-                                        color: Color(0xFF00E676),
-                                        size: 6,
+                                  child: Container(
+                                    margin: const EdgeInsets.only(left: 10),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x3300E676),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                        color: const Color(0x8800E676),
+                                        width: 1,
                                       ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        fps.isNotEmpty ? '$label · $fps' : label,
-                                        style: const TextStyle(
-                                          color: Color(0xFF69F0AE),
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.lens,
+                                          color: Color(0xFF00E676),
+                                          size: 6,
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          fps.isNotEmpty ? '$label · $fps' : label,
+                                          style: const TextStyle(
+                                            color: Color(0xFF69F0AE),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },

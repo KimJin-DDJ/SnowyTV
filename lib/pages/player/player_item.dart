@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:kazumi/pages/player/player_item_panel.dart';
+import 'package:kazumi/pages/player/quality_inspector_sheet.dart';
 import 'package:kazumi/pages/player/player_keyboard_shortcuts.dart';
 import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/pages/player/player_panel_hold.dart';
@@ -390,6 +391,19 @@ class _PlayerItemState extends State<PlayerItem>
 
   KeyEventResult? _handleTvNavigationKey(KeyEvent event) {
     final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.contextMenu ||
+        key == LogicalKeyboardKey.info ||
+        key == LogicalKeyboardKey.keyM) {
+      if (event is KeyDownEvent) {
+        showQualityInspectorSheet(
+          context,
+          playerController: playerController,
+          videoPageController: videoPageController,
+          onSwitchRoad: widget.onToggleSidePanel,
+        );
+      }
+      return KeyEventResult.handled;
+    }
     final isSelect = key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter ||

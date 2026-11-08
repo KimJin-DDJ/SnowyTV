@@ -60,8 +60,8 @@ class QualityInspectorSheet extends StatelessWidget {
                 final vCodec = debug.videoCodec.isNotEmpty ? debug.videoCodec.toUpperCase() : 'H.264 / AVC';
                 final aCodec = debug.audioCodec.isNotEmpty ? debug.audioCodec.toUpperCase() : 'AAC';
                 final hwdec = debug.hwdecActive.isNotEmpty
-                    ? (debug.hwdecActive == 'mediacodec' ? 'MediaCodec 硬件直通直显' : debug.hwdecActive)
-                    : 'MediaCodec 硬件加速直显';
+                    ? (debug.hwdecActive == 'mediacodec' ? 'MediaCodec 硬件加速' : debug.hwdecActive)
+                    : 'MediaCodec 硬件加速';
                 final pixelFormat = debug.pixelFormat.isNotEmpty ? debug.pixelFormat : 'YUV420P / BT.709';
                 final drops = '${debug.droppedFrames} 帧 (100% 流畅)';
 
@@ -205,8 +205,8 @@ class QualityInspectorSheet extends StatelessWidget {
                             ),
                             const Divider(height: 16),
                             _optimizationRow(
-                              'MediaCodec 零拷贝硬件直通',
-                              '直通大屏硬件图层，0% GPU 着色器负荷，杜绝掉帧卡顿',
+                              'MediaCodec 硬件加速解码',
+                              'OpenGL 纹理加速 + 软解智能兜底，杜绝非标视频黑屏与闪退',
                               true,
                             ),
                             const Divider(height: 16),

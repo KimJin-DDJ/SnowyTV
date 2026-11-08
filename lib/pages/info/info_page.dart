@@ -306,6 +306,16 @@ class _InfoPageState extends State<InfoPage>
     }
   }
 
+  void _openSourceSheet() {
+    showAdaptiveBottomSheet<void>(
+      context: context,
+      maxHeightFactor: 0.88,
+      builder: (context) {
+        return SourceSheet(infoController: infoController);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final showWindowButton = DesktopWindowConfig.showWindowButton;
@@ -396,6 +406,7 @@ class _InfoPageState extends State<InfoPage>
                                   bangumiItem: infoController.bangumiItem,
                                   isLoading: showBangumiInfoSkeleton,
                                   showRating: showRating,
+                                  onStartWatching: _openSourceSheet,
                                 ),
                               ),
                             ),
@@ -447,15 +458,7 @@ class _InfoPageState extends State<InfoPage>
       ),
       floatingActionButton: FloatingActionButton.extended(
         tooltip: '开始观看',
-        onPressed: () {
-          showAdaptiveBottomSheet<void>(
-            context: context,
-            maxHeightFactor: 0.88,
-            builder: (context) {
-              return SourceSheet(infoController: infoController);
-            },
-          );
-        },
+        onPressed: _openSourceSheet,
         label: const Text('开始观看'),
         icon: const Icon(Icons.play_arrow_rounded),
       ),
