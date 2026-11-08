@@ -4,6 +4,7 @@
         android:name="${applicationName}"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:banner="@drawable/tv_banner"
         android:extractNativeLibs="true">
         <meta-data
@@ -12,6 +13,10 @@
         />
         <activity
             android:name=".MainActivity"
+            android:label="Snowy TV"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:banner="@drawable/tv_banner"
             android:exported="true"
             android:launchMode="singleTop"
             android:supportsPictureInPicture="true"
