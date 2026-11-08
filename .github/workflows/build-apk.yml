@@ -1,0 +1,67 @@
+name: Build TV APKs
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Split APKs (armeabi-v7a & arm64-v8a)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build 32-bit APK (for Chromecast HD / armeabi-v7a)
+        run: |
+          flutter build apk --release --split-per-abi --target-platform android-arm \
+            --build-name "2.3.8-snowy.6" --build-number "20313"
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/Snowy-TV_2.3.8-snowy.6_armeabi-v7a.apk
+
+      - name: Build 64-bit APK (for Chromecast 4K / arm64-v8a)
+        run: |
+          flutter build apk --release --split-per-abi --target-platform android-arm64 \
+            --build-name "2.3.8-snowy.6" --build-number "20313"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/Snowy-TV_2.3.8-snowy.6_arm64-v8a.apk
+
+      - name: Calculate SHA-256 Checksums
+        run: |
+          cd dist
+          sha256sum *.apk > sha256.txt
+          cat sha256.txt
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: snowy-tv-apks
+          path: dist/*
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: false
+          prerelease: false

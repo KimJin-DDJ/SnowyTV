@@ -1,0 +1,334 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_modular/flutter_modular.dart';
+import 'package:flutter/services.dart';
+import 'package:kazumi/bean/dialog/dialog_helper.dart';
+import 'package:kazumi/bean/settings/theme_provider.dart';
+import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
+import 'package:kazumi/navigation.dart';
+import 'package:kazumi/bean/widget/menu_focus_bridge.dart';
+import 'package:kazumi/pages/menu/route_visibility.dart';
+import 'package:kazumi/pages/router.dart';
+
+class ScaffoldMenu extends StatefulWidget {
+  const ScaffoldMenu({super.key, required this.location});
+
+  final String location;
+
+  @override
+  State<ScaffoldMenu> createState() => _ScaffoldMenu();
+}
+
+class _ScaffoldMenu extends State<ScaffoldMenu> with RouteAware {
+  final _outletKey = GlobalKey<RouterOutletState>();
+  final _focusBridge = MenuFocusBridge();
+  final _searchFocus = FocusNode(debugLabel: 'TV search');
+  late int _selectedIndex = menu.indexForPath(widget.location);
+  DateTime? _lastExitPromptAt;
+
+  /// The shell sits at the bottom of the root stack and stays mounted while
+  /// other pages cover it, so it publishes that state for its subtree.
+  bool _isCovered = false;
+
+  @override
+  void didUpdateWidget(covariant ScaffoldMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.location != widget.location) {
+      _selectedIndex = menu.indexForPath(widget.location);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute<void>) {
+      rootRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    rootRouteObserver.unsubscribe(this);
+    _searchFocus.dispose();
+    _focusBridge.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didPushNext() => _setCovered(true);
+
+  @override
+  void didPopNext() => _setCovered(false);
+
+  void _setCovered(bool value) {
+    if (!mounted || _isCovered == value) {
+      return;
+    }
+    setState(() => _isCovered = value);
+  }
+
+  void _selectDestination(int index) {
+    _lastExitPromptAt = null;
+    if (index == _selectedIndex) {
+      return;
+    }
+    final outlet = _outletKey.currentState;
+    if (outlet == null) return;
+    _focusBridge.keepMenuFocus();
+    outlet.navigate('/tab${menu.getPath(index)}/');
+    setState(() => _selectedIndex = index);
+  }
+
+  void _handleSystemBack(BuildContext context) {
+    if (_outletKey.currentState?.maybePop() ?? false) {
+      _lastExitPromptAt = null;
+      return;
+    }
+
+    if (_selectedIndex != 0) {
+      _selectDestination(0);
+      return;
+    }
+
+    final now = DateTime.now();
+    final lastPromptAt = _lastExitPromptAt;
+    if (lastPromptAt == null ||
+        now.difference(lastPromptAt) > const Duration(seconds: 2)) {
+      _lastExitPromptAt = now;
+      KazumiDialog.showToast(message: '再按一次退出应用', context: context);
+      return;
+    }
+
+    _lastExitPromptAt = null;
+    SystemNavigator.pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final background = _backgroundImage(context);
+    return RouteVisibility(
+      isCovered: _isCovered,
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) {
+            _handleSystemBack(context);
+          }
+        },
+        child: OrientationBuilder(
+          builder: (context, orientation) {
+            final shell = orientation == Orientation.portrait
+                ? _bottomMenu(context, _selectedIndex, background != null)
+                : _sideMenu(context, _selectedIndex, background != null);
+            if (background == null) return shell;
+            return ColoredBox(
+              color: Theme.of(context).colorScheme.surfaceContainer,
+              child: Stack(fit: StackFit.expand, children: [background, shell]),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 用户设置的主界面背景图；没设置或文件已不存在时返回 null。
+  Widget? _backgroundImage(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+    final path = themeProvider.backgroundImagePath;
+    if (path.isEmpty) return null;
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    return Opacity(
+      opacity: themeProvider.backgroundImageOpacity,
+      child: Image.file(
+        file,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        excludeFromSemantics: true,
+        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+      ),
+    );
+  }
+
+  /// 有背景图时让各标签页的底色透明，把背景图露出来。
+  Widget _seeThrough(BuildContext context, Widget child) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(
+        scaffoldBackgroundColor: Colors.transparent,
+        appBarTheme: theme.appBarTheme.copyWith(
+          backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.6),
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _outlet(
+    BuildContext context, {
+    required TraversalDirection toMenu,
+    required bool hasBackground,
+    BorderRadius? borderRadius,
+  }) {
+    Widget child = NotificationListener<NavigationNotification>(
+      // A non-poppable outlet must not override the shell's PopScope state.
+      onNotification: (notification) => !notification.canHandlePop,
+      child: RouterOutlet(key: _outletKey),
+    );
+    if (hasBackground) {
+      child = _seeThrough(context, child);
+    }
+    if (borderRadius != null) {
+      child = ClipRRect(borderRadius: borderRadius, child: child);
+    }
+    return Focus(
+      focusNode: _focusBridge.contentNode,
+      onKeyEvent: (_, event) => _focusBridge.handleContentKey(
+        event,
+        toMenu: toMenu,
+        selectedIndex: _selectedIndex,
+        destinationCount: menu.menuList.length,
+        leadingAction: toMenu == TraversalDirection.left ? _searchFocus : null,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: hasBackground
+              ? Colors.transparent
+              : Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: borderRadius,
+        ),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _menuFocus(TraversalDirection toContent, Widget child) {
+    return Focus(
+      focusNode: _focusBridge.menuNode,
+      onKeyEvent: (_, event) => _focusBridge.handleMenuKey(
+        event,
+        toContent: toContent,
+        leadingAction:
+            toContent == TraversalDirection.right ? _searchFocus : null,
+      ),
+      child: child,
+    );
+  }
+
+  Widget _bottomMenu(
+    BuildContext context,
+    int selectedIndex,
+    bool hasBackground,
+  ) {
+    return Scaffold(
+      backgroundColor: hasBackground ? Colors.transparent : null,
+      body: _outlet(
+        context,
+        toMenu: TraversalDirection.down,
+        hasBackground: hasBackground,
+      ),
+      bottomNavigationBar: _menuFocus(
+        TraversalDirection.up,
+        NavigationBar(
+          destinations: const <Widget>[
+            NavigationDestination(
+              selectedIcon: Icon(Icons.home),
+              icon: Icon(Icons.home_outlined),
+              label: '推荐',
+            ),
+            NavigationDestination(
+              selectedIcon: Icon(Icons.timeline),
+              icon: Icon(Icons.timeline_outlined),
+              label: '时间表',
+            ),
+            NavigationDestination(
+              selectedIcon: Icon(Icons.favorite),
+              icon: Icon(Icons.favorite_outlined),
+              label: '追番',
+            ),
+            NavigationDestination(
+              selectedIcon: Icon(Icons.settings),
+              icon: Icon(Icons.settings),
+              label: '我的',
+            ),
+          ],
+          selectedIndex: selectedIndex,
+          onDestinationSelected: _selectDestination,
+        ),
+      ),
+    );
+  }
+
+  Widget _sideMenu(
+    BuildContext context,
+    int selectedIndex,
+    bool hasBackground,
+  ) {
+    const borderRadius = BorderRadius.only(
+      topLeft: Radius.circular(16),
+      bottomLeft: Radius.circular(16),
+    );
+    final shellColor = hasBackground
+        ? Colors.transparent
+        : Theme.of(context).colorScheme.surfaceContainer;
+    return Scaffold(
+      backgroundColor: shellColor,
+      body: Row(
+        children: [
+          EmbeddedNativeControlArea(
+            child: _menuFocus(
+              TraversalDirection.right,
+              NavigationRail(
+                backgroundColor: shellColor,
+                groupAlignment: 1,
+                leading: FloatingActionButton(
+                  elevation: 0,
+                  heroTag: null,
+                  focusNode: _searchFocus,
+                  tooltip: '搜索',
+                  onPressed: () => context.pushNamed('/search/'),
+                  child: const Icon(Icons.search),
+                ),
+                labelType: NavigationRailLabelType.selected,
+                destinations: const <NavigationRailDestination>[
+                  NavigationRailDestination(
+                    selectedIcon: Icon(Icons.home),
+                    icon: Icon(Icons.home_outlined),
+                    label: Text('推荐'),
+                  ),
+                  NavigationRailDestination(
+                    selectedIcon: Icon(Icons.timeline),
+                    icon: Icon(Icons.timeline_outlined),
+                    label: Text('时间表'),
+                  ),
+                  NavigationRailDestination(
+                    selectedIcon: Icon(Icons.favorite),
+                    icon: Icon(Icons.favorite_border),
+                    label: Text('追番'),
+                  ),
+                  NavigationRailDestination(
+                    selectedIcon: Icon(Icons.settings),
+                    icon: Icon(Icons.settings_outlined),
+                    label: Text('我的'),
+                  ),
+                ],
+                selectedIndex: selectedIndex,
+                onDestinationSelected: _selectDestination,
+              ),
+            ),
+          ),
+          Expanded(
+            child: _outlet(
+              context,
+              toMenu: TraversalDirection.left,
+              hasBackground: hasBackground,
+              borderRadius: borderRadius,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
