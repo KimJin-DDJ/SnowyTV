@@ -422,6 +422,15 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 当前这一集已经尝试失败的线路（自动切线时使用）。
   final Set<int> _failedRoads = {};
 
+  /// 切换线路后，原来的集号可能超出新线路的集数，这里取该线路最接近的一集。
+  int _clampEpisodeToRoad(int episode, int road) {
+    if (road < 0 || road >= roadList.length) return episode;
+    final count = roadList[road].data.length;
+    if (count == 0) return episode;
+    if (episode < 1) return 1;
+    return episode > count ? count : episode;
+  }
+
   Future<void> changeEpisode(
     int episode, {
     int currentRoad = 0,
@@ -429,6 +438,7 @@ abstract class _VideoPageController with Store implements Disposable {
     required PlayerController playerController,
     bool isRoadFallback = false,
   }) async {
+    episode = _clampEpisodeToRoad(episode, currentRoad);
     if (!isRoadFallback) _failedRoads.clear();
     final session = _playbackSessions.begin();
     final selection = VideoEpisodeSelection(
@@ -567,17 +577,46 @@ abstract class _VideoPageController with Store implements Disposable {
           );
         } else {
           playerController.danmaku.applyUnavailableDanmakuLoad(result);
+          // Empty / no match / service unavailable stay silent; only a real
+          // failure (after a quiet retry) gets a short hint.
           if (result.isFailed) {
-            KazumiDialog.showToast(message: '弹幕加载失败，可手动检索');
+            unawaited(_showDanmakuFailureHintWhenPlaying(
+              playerController,
+              session,
+              danmakuSession,
+            ));
           }
         }
       }
     } catch (e) {
       if (session.isActive && danmakuSession.isActive) {
         playerController.danmaku.finishDanmakuLoad(disableDanmaku: true);
-        KazumiDialog.showToast(message: '弹幕加载失败，可手动检索');
       }
       KazumiLogger().w('VideoPageController: failed to load danmaku', error: e);
+    }
+  }
+
+  /// Wait until the picture is actually playing so the hint never covers the
+  /// loading screen. Give up silently if playback doesn't start in time.
+  Future<void> _showDanmakuFailureHintWhenPlaying(
+    PlayerController playerController,
+    AsyncSession session,
+    AsyncSession danmakuSession,
+  ) async {
+    try {
+      await asyncWhen(
+        (_) =>
+            !playerController.playback.loading &&
+            playerController.playback.playing &&
+            !playerController.playback.isBuffering,
+        timeout: 60000,
+      );
+      await Future.delayed(const Duration(seconds: 2));
+    } catch (_) {
+      return;
+    }
+    if (session.isActive && danmakuSession.isActive) {
+      KazumiDialog.showToast(message: '弹幕暂时无法加载');
     }
   }
 
@@ -684,7 +723,9 @@ abstract class _VideoPageController with Store implements Disposable {
       KazumiLogger()
           .i('VideoPageController: resolved video URL: ${source.url}');
 
-      final params = PlaybackInitParams(
+      PlaybackInitParams buildParams(
+              Map<String, String> httpHeaders, String referer) =>
+          PlaybackInitParams(
         videoUrl: source.url,
         offset: source.offset,
         isLocalPlayback: false,
@@ -696,10 +737,10 @@ abstract class _VideoPageController with Store implements Disposable {
         danmakuEpisodeNumber: resolvedEpisode.danmakuEpisodeNumber,
         pageUrl: resolvedEpisode.pageUrl,
         sortNumber: resolvedEpisode.sortNumber,
-        httpHeaders: headers,
+        httpHeaders: httpHeaders,
         adBlockerEnabled: forceAdBlocker || currentPlugin.adBlocker,
         episodeTitle: resolvedEpisode.displayTitle,
-        referer: effectiveReferer,
+        referer: referer,
         currentRoad: resolvedEpisode.roadIndex,
         coverUrl: bangumiItem.images['large'],
         bangumiName: bangumiItem.nameCn.isNotEmpty
@@ -707,8 +748,30 @@ abstract class _VideoPageController with Store implements Disposable {
             : bangumiItem.name,
       );
 
+      final params = buildParams(headers, effectiveReferer);
+      // Some CDNs (e.g. Douyin's 365yg.com behind 7sefun) reject any request
+      // carrying a Referer with HTTP 403. Retry the same URL once without it
+      // before giving up on this line.
+      var retriedWithoutReferer = !headers.containsKey('referer');
       playerController.playback.onFatalOpenError = (error) {
         if (session.isStale) return;
+        if (!retriedWithoutReferer) {
+          retriedWithoutReferer = true;
+          KazumiLogger().i('VideoPageController: open failed with referer, '
+              'retrying without referer: ${source.url}');
+          final noReferer = Map<String, String>.of(headers)..remove('referer');
+          unawaited(() async {
+            final ok = await playerController.init(buildParams(noReferer, ''));
+            if (session.isStale) return;
+            if (ok) {
+              playingEpisode = VideoEpisodeSelection(
+                episode: resolvedEpisode.listIndex,
+                road: resolvedEpisode.roadIndex,
+              );
+            }
+          }());
+          return;
+        }
         unawaited(_fallbackToNextRoad(
           resolvedEpisode,
           offset: offset,

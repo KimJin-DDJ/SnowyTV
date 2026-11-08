@@ -174,6 +174,7 @@ class _VideoPageState extends State<VideoPage>
       videoPageController.bangumiItem,
       videoPageController.currentPlugin.name,
     );
+    var restored = false;
     if (progress != null) {
       if (videoPageController.roadList.length > progress.road) {
         if (videoPageController.roadList[progress.road].data.length >=
@@ -182,11 +183,20 @@ class _VideoPageState extends State<VideoPage>
             episode: progress.episode,
             road: progress.road,
           );
+          restored = true;
           if (playResume) {
             videoPageController.historyOffset = progress.progress.inSeconds;
           }
         }
       }
+    }
+    // 没有可用的观看记录时，默认从播放线路 1 的最新一集开始。
+    final roads = videoPageController.roadList;
+    if (!restored && roads.isNotEmpty && roads[0].data.isNotEmpty) {
+      videoPageController.resetEpisodeState(
+        episode: roads[0].data.length,
+        road: 0,
+      );
     }
     _revealCurrentEpisode();
 
@@ -557,12 +567,16 @@ class _VideoPageState extends State<VideoPage>
             !playerController.playback.loading &&
             !videoPageController.loading,
         disableAnimations: disableAnimations,
-        onEpisodeSelected: (episode, road) {
-          if (episode == videoPageController.selectedEpisode.episode &&
-              road == videoPageController.selectedEpisode.road) {
+        onEpisodeSelected: (episode, road, {bool fromRoadSwitch = false}) {
+          final selected = videoPageController.selectedEpisode;
+          // 同一集且上一次加载成功时无需重播；加载失败后允许重新选择以重试。
+          if (episode == selected.episode &&
+              road == selected.road &&
+              videoPageController.errorMessage == null) {
             return;
           }
-          _closeSidePanel();
+          // 切换线路时保持面板打开，方便继续浏览新线路的剧集。
+          if (!fromRoadSwitch) _closeSidePanel();
           changeEpisode(episode, currentRoad: road);
         },
         onDownload: (road) => showAdaptiveBottomSheet<void>(
