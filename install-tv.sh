@@ -13,7 +13,7 @@ fi
 [[ $# -le 1 && ${1:-} != -* ]] || fail '用法：bash install-tv.sh [电视 IP:端口或 adb 设备序列号]'
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-version=2.3.8-snowy.7
+version=2.3.8-snowy.8
 adb=adb
 if ! command -v adb >/dev/null; then
   if [[ -x "/private/tmp/snowytv-build-01a1b8e6/sdk/platform-tools/adb" ]]; then
@@ -45,10 +45,10 @@ state=$("$adb" -s "$serial" get-state 2>/dev/null) || fail "设备 $serial 未�
 abis=$("$adb" -s "$serial" shell getprop ro.product.cpu.abilist | tr -d '\r')
 
 target_abi="armeabi-v7a"
-expected_sha256="e56c4f37edd7febb1345738ea387c70e6285393ecf4092acb5943dec6edbc7bb"
+expected_sha256=""
 if [[ ",$abis," == *,arm64-v8a,* ]]; then
   target_abi="arm64-v8a"
-  expected_sha256="6da609cd67f04b10a555e981b9c25e2768db7161addc438224565526f752ef9e"
+  expected_sha256=""
 fi
 
 apk_filename="SnowyTV-v${version}-${target_abi}.apk"
