@@ -360,7 +360,14 @@ abstract class _PlayerPlaybackController with Store {
       }
 
       // 不少 HLS 源把 TS 分片伪装成 .jpg/.png，新版 FFmpeg 默认会拒绝这类扩展名。
-      await safeSetProperty('demuxer-lavf-o', 'extension_picky=0');
+      // 必须追加而不是覆盖：media_kit 已在 demuxer-lavf-o 中写入 hls_ad_filter、
+      // allowed_extensions、protocol_whitelist 等选项，直接 setProperty 会把广告过滤冲掉。
+      try {
+        await pp.command(
+            ['change-list', 'demuxer-lavf-o', 'append', 'extension_picky=0']);
+      } catch (e) {
+        KazumiLogger().w('Player: failed to append extension_picky=0: $e');
+      }
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
