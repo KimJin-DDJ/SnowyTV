@@ -1,121 +1,129 @@
-# Snowy TV ❄️
+<p align="center">
+  <img src="docs/images/snowy-logo.png" width="160" alt="Snowy TV logo">
+</p>
 
-> **专为 Google TV / Chromecast 打造的极速流畅开源动漫播放器**  
-> 基于 Kazumi TV 开源项目重构，带来底层渲染性能调优、遥控器全场景交互适配，以及 **Agent 同局域网一键无线直推** 的现代化部署体验。
+<h1 align="center">Snowy TV ❄️</h1>
 
-[![Build TV APKs](https://github.com/KimJin-DDJ/SnowyTV/actions/workflows/build-apk.yml/badge.svg)](https://github.com/KimJin-DDJ/SnowyTV/actions/workflows/build-apk.yml)
-[![Release](https://img.shields.io/github/v/release/KimJin-DDJ/SnowyTV?include_prereleases)](https://github.com/KimJin-DDJ/SnowyTV/releases)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+<p align="center">
+  <b>专为 Google TV / Chromecast 打造的流畅开源动漫播放器</b><br>
+  A fast, open-source anime player built for Google TV and Chromecast with Google TV.
+</p>
 
----
-
-## 💡 项目背景与解决的痛点
-
-在低功耗客厅电视设备（如 **Chromecast with Google TV HD**，仅搭载 Amlogic S805X2 芯片与 1.5GB 内存）上，原版开源 TV 应用普遍存在以下致命体验问题：
-1. **一渲染就闪退**：移动端默认的 Flutter Impeller 渲染引擎在老旧电视 GPU 上兼容性差，常导致崩溃退出。
-2. **严重掉帧（低至 10fps）**：大屏上的高斯模糊（`BackdropFilter`）和大量动态阴影严重拖垮电视芯片 fillrate。
-3. **遥控器方向键切不下去**：搜索页输入框、历史搜索、条件筛选与瀑布流番剧卡片无法用遥控器 D-Pad 顺畅切换焦点。
-4. **片源解析超时转圈**：电视端内置 WebView 资源解析机制未对低配 CPU 优化，容易出现长时间等待或“解析失败”。
-
-**Snowy TV 对上述底层问题进行了全量重写与专项优化，实现了 60fps 满帧运行、秒级片源解析以及遥控器焦点顺滑过渡。**
+<p align="center">
+  <a href="https://github.com/KimJin-DDJ/SnowyTV/actions/workflows/build-apk.yml"><img src="https://github.com/KimJin-DDJ/SnowyTV/actions/workflows/build-apk.yml/badge.svg" alt="Build TV APKs"></a>
+  <a href="https://github.com/KimJin-DDJ/SnowyTV/releases"><img src="https://img.shields.io/github/v/release/KimJin-DDJ/SnowyTV?include_prereleases" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3"></a>
+</p>
 
 ---
 
-## 📺 客厅真机实测效果
+## ⬇️ Download / 下载
 
-| 遥控器方向键全页面焦点导航（真机实录） | 1080p 全帧率丝滑播放与秒级解析 |
-| :---: | :---: |
-| ![TV Home Focus](docs/images/tv_home_focus.png) | ![TV Playback 1080p](docs/images/tv_playback_1080p.png) |
+**最新版本 Latest release：** <https://github.com/KimJin-DDJ/SnowyTV/releases/latest>
 
----
+当前版本 `v2.3.8-snowy.6` 提供以下安装包：
 
-## 🌟 核心优化细节
+| 设备 Device | 架构 ABI | 文件名 File |
+| :--- | :--- | :--- |
+| Chromecast with Google TV (HD) | `armeabi-v7a` (32-bit) | `SnowyTV-v2.3.8-snowy.6-armeabi-v7a.apk` |
+| Chromecast with Google TV (4K) 及多数 Android TV 盒子 | `arm64-v8a` (64-bit) | `SnowyTV-v2.3.8-snowy.6-arm64-v8a.apk` |
 
-### 1. 硬件级渲染重构（告别 10fps 卡顿）
-- **Skia OpenGL 硬件纹理加速**：彻底禁用 Impeller 兼容性软解，开启底层 OpenGL 硬件加速与纹理直通渲染（`hardwareAccelerated="true"`）。
-- **零毛玻璃开销**：消除大屏 UI 中消耗显存带宽的毛玻璃模糊层，内存占用降低 40%，帧率稳定在 60fps。
+不确定设备架构时，Chromecast HD 选择 `armeabi-v7a`。
 
-### 2. 遥控器 D-Pad 导航树双向桥接（告别焦点卡死）
-- **焦点树重塑**：重构 `FocusNode` 遍历逻辑，遥控器上下左右可以无缝在“搜索栏 ↔ 筛选器 ↔ 历史记录 ↔ 番剧网格 ↔ 侧边栏”之间穿梭。
-- **按键事件映射**：全面适配遥控器按键（D-Pad 方向键、OK 键激活搜索/选集、返回键退层、播放界面快进/音量调节）。
+### 安装方法 / How to install
 
-### 3. 秒级并发解析通道（400ms 直出）
-- **解析管线重载**：优化内置解析器并发策略，主流片源（如 MXdm）解析耗时降低至 **400ms**，彻底终结无限转圈。
+**方法一：Downloader（无需电脑）**
 
-### 4. 精准双架构支持
-- **`armeabi-v7a` (32位)**：专为 Chromecast with Google TV (HD) 及低配 32 位电视棒量身定制。
-- **`arm64-v8a` (64位)**：专为 Chromecast with Google TV (4K) 及主流 Android TV 盒子构建。
+1. 在电视上安装 **Downloader by AFTVnews**（Google Play 搜索 `Downloader`）。
+2. 在手机或电脑上打开上方 Releases 页面，复制对应架构 APK 的下载链接。
+3. 打开 Downloader，把链接粘贴到地址栏并按 **Go**，下载完成后点 **安装**。
+4. 若提示未知来源被禁止，在弹出的设置里为 Downloader 开启 **允许来自此来源**。若系统隐藏了该选项，请先在 **设置 → 系统 → 关于 → Android TV OS 版本号** 上连续按确认键 7 次开启开发者模式。
 
----
+**方法二：ADB 命令行（电脑）**
 
-## 🚀 推荐安装方式：局域网 Agent 一键无线直推（Flagship Experience）
+1. 电视开启 **设置 → 系统 → 开发者选项 → 无线调试**，电脑与电视连接同一 Wi-Fi。
+2. 安装 Android SDK Platform-Tools，并在终端连接电视：
+   ```bash
+   adb connect 192.168.1.42:40123   # 换成电视无线调试页面显示的 IP:端口
+   adb install -r SnowyTV-v2.3.8-snowy.6-armeabi-v7a.apk
+   ```
+3. 如果仓库中的脚本更方便，也可以在克隆的仓库目录运行 `bash install-tv.sh 192.168.1.42:40123`。脚本会检查设备架构并安装对应版本。
 
-我们认为**在智能电视上安装软件，不应该经历“用遥控器在软键盘上痛苦输入长网址”或“找 U 盘插拔”的折磨**。  
-Snowy TV 倡导 **Agent-Native** 的现代智能电视部署体验——**让 AI Agent 帮你自动发现电视、自动适配并无线直推**！
-
-```
-┌──────────────────┐               同一局域网 Wi-Fi              ┌────────────────────────┐
-│  你的电脑 / Agent │ ─────────────────────────────────────────> │ Chromecast / Google TV │
-│  (Mac / Linux)   │      自动探测芯片架构 ➔ 卸载旧版残留 ➔        │                        │
-│                  │      秒级无线推送 APK ➔ 自动在电视启动        │  直接进入 Snowy TV 首页 │
-└──────────────────┘                                             └────────────────────────┘
-```
-
-### 极速上手三步法：
-
-1. **电视开启无线调试**：
-   - 电视进入「设置 → 系统 → 关于 → Android TV OS 版本号」，连续按确认键 7 次开启开发者模式。
-   - 进入「设置 → 系统 → 开发者选项 → 无线调试」，开启开关。
-2. **连接同一 Wi-Fi**：确保电脑与电视连接在同一个 Wi-Fi 下。
-3. **呼叫 Agent 或执行一键脚本**：
-   - 如果你正在使用 **AI Coding Agent**（如 Google Antigravity、Claude Code、Cursor 等），直接对 Agent 说：
-     > **“帮我把 Snowy TV 安装到我的电视上”**
-     Agent 会自动扫描局域网设备并执行部署。
-   - 或者在电脑终端一键执行：
-     ```bash
-     git clone https://github.com/KimJin-DDJ/SnowyTV.git
-     cd SnowyTV
-     bash install-tv.sh [电视IP:端口]
-     ```
-     > **脚本完全自动化**：
-     > - 自动发现并握手电视设备；
-     > - 自动检测电视 CPU 是 32 位还是 64 位，精准匹配安装包；
-     > - 自动检测并卸载历史旧版包名（如 `com.predidit.kazumi`），避免签名冲突；
-     > - 安装完毕后自动在电视上直接打开 Snowy TV！
+> 如果安装时提示签名冲突（例如电视上装过其他签名的 Kazumi 版本），请先卸载旧版本，再重新安装。卸载前请备份收藏和观看记录。
 
 ---
 
-### 备选方式：电视遥控器 Downloader 下载（无电脑时使用）
+## 📺 Screenshots / 截图
 
-若手边没有电脑，可在电视端安装 **Downloader** 应用，输入对应架构的直链：
-- **Chromecast HD (32位)**：
-  ```text
-  https://github.com/KimJin-DDJ/SnowyTV/releases/latest/download/Snowy-TV_2.3.8-snowy.6_armeabi-v7a.apk
-  ```
-- **Chromecast 4K (64位)**：
-  ```text
-  https://github.com/KimJin-DDJ/SnowyTV/releases/latest/download/Snowy-TV_2.3.8-snowy.6_arm64-v8a.apk
-  ```
+以下截图均为 Chromecast with Google TV 真机录制。All screenshots were captured on a Chromecast with Google TV.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/tv-home.png" width="420" alt="Home: anime grid"><br><sub>首页：热门番组</sub></td>
+    <td align="center"><img src="docs/screenshots/tv-detail.png" width="420" alt="Anime detail page"><br><sub>番剧详情与开始观看</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/tv-player.png" width="420" alt="Player with controls"><br><sub>播放界面与控制栏</sub></td>
+    <td align="center"><img src="docs/screenshots/tv-history.png" width="420" alt="Watch history"><br><sub>观看记录</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/tv-settings-playback.png" width="420" alt="Playback settings"><br><sub>播放设置</sub></td>
+  </tr>
+</table>
 
 ---
 
-## 🛠️ 本地构建
+## ✨ Features / 功能
+
+以下功能均来自源码实现。All features below are implemented in the source code.
+
+- **番剧浏览 Browse**：Bangumi 番剧时间表、热门/推荐列表、最近更新页面。
+- **搜索 Search**：适配遥控器的屏幕键盘，支持拼音首字母搜索、搜索历史和筛选条件。
+- **片源规则 Sources**：通过规则（插件）导入和管理片源，内置插件商店与规则管理页面。
+- **播放 Playback**：多线路切换、选集面板、倍速、画面比例、截图、画质信息，可选硬件解码与渲染器。
+- **弹幕 Danmaku**：弹幕源选择、弹幕类型与时间校准，支持屏蔽规则。
+- **广告过滤 Ad filter**：针对 M3U8 播放列表的广告过滤。
+- **一起看 Watch together**：创建或加入同步观看房间（SyncPlay）。
+- **追番与同步 Sync**：Bangumi 账号追番收藏、观看记录，以及 WebDAV 同步。
+- **低内存模式 Low-memory mode**：减少资源占用，适合内存较小的电视设备。
+- **网络与更新 Network & updates**：代理设置、网络镜像设置、启动时检查更新。
+- **外部播放器 External player**：可将视频交给其他播放器打开。
+
+---
+
+## 🎮 遥控器操作 / D-pad Remote
+
+Snowy TV 为电视遥控器设计，全部功能都可以只用方向键和确认键完成。
+
+- **方向键**：在首页、搜索、筛选、番剧网格、侧边栏、选集面板之间移动焦点，焦点框始终可见。
+- **确认键 (OK)**：打开番剧、激活搜索、选择线路和集数。
+- **返回键 (Back)**：逐层退出页面、面板和播放界面。
+- **全屏播放**：左右方向键直接调整进度。
+
+---
+
+## 🚀 Build from source / 从源码构建
+
+环境要求 Requirements：Flutter 3.47.6（见 `pubspec.yaml`）、Android SDK 与 JDK。
 
 ```bash
-# 构建 32 位安装包 (Chromecast HD)
-./build-tv.sh
+git clone https://github.com/KimJin-DDJ/SnowyTV.git
+cd SnowyTV
 
-# 构建 64 位安装包 (Chromecast 4K / 模拟器)
-./build-tv.sh --local
+./build-tv.sh          # armeabi-v7a 安装包（Chromecast HD）
+./build-tv.sh --local  # arm64-v8a 安装包（Chromecast 4K / 模拟器）
 ```
 
-编译产物将生成在根目录下：
+编译产物会生成在仓库根目录：
+
 - `Snowy-TV_2.3.8-snowy.6_armeabi-v7a.apk`
 - `Snowy-TV_2.3.8-snowy.6_arm64-v8a.apk`
 
+调试运行可使用 `flutter run`，目标设备选择 Android 模拟器或真机即可。
+
 ---
 
-## 📄 开源许可与致谢
+## 📄 License & Credits / 开源许可与致谢
 
-- 本项目基于开源的 [Kazumi](https://github.com/Predidit/Kazumi) 及 [Kazumi-TV](https://github.com/LeoLee0812/Kazumi-TV) 社区版优化重构，遵循 **GPL-3.0** 开源协议。
-- 致敬所有开源动漫爱好者与播放器生态贡献者！
+- Snowy TV 基于开源项目 [Kazumi](https://github.com/Predidit/Kazumi) 及 [Kazumi-TV](https://github.com/LeoLee0812/Kazumi-TV) 社区版重构优化，遵循 **GPL-3.0** 开源协议，详见 [LICENSE](LICENSE)。
+- 感谢所有开源动漫爱好者与播放器生态的贡献者。
