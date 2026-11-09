@@ -2,14 +2,14 @@
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-version=2.3.8-snowy.6
-build_number=203131
+version=2.3.8-snowy.7
+build_number=203132
 case "${1:-}" in
   '') target=android-arm; abi=armeabi-v7a ;;
   --local) target=android-arm64; abi=arm64-v8a ;;
   *) echo '用法：build-tv.sh [--local]' >&2; exit 2 ;;
 esac
-output="$here/Snowy-TV_${version}_${abi}.apk"
+output="$here/SnowyTV-v${version}-${abi}.apk"
 
 if ! command -v flutter >/dev/null && [[ -x /private/tmp/snowytv-build-01a1b8e6/flutter/bin/flutter ]]; then
   export PATH="/private/tmp/snowytv-build-01a1b8e6/flutter/bin:$PATH"

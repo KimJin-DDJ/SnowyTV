@@ -36,15 +36,15 @@ jobs:
       - name: Build 32-bit APK (for Chromecast HD / armeabi-v7a)
         run: |
           flutter build apk --release --split-per-abi --target-platform android-arm \
-            --build-name "2.3.8-snowy.6" --build-number "20313"
+            --build-name "2.3.8-snowy.7" --build-number "203132"
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/Snowy-TV_2.3.8-snowy.6_armeabi-v7a.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/SnowyTV-v2.3.8-snowy.7-armeabi-v7a.apk
 
       - name: Build 64-bit APK (for Chromecast 4K / arm64-v8a)
         run: |
           flutter build apk --release --split-per-abi --target-platform android-arm64 \
-            --build-name "2.3.8-snowy.6" --build-number "20313"
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/Snowy-TV_2.3.8-snowy.6_arm64-v8a.apk
+            --build-name "2.3.8-snowy.7" --build-number "203132"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/SnowyTV-v2.3.8-snowy.7-arm64-v8a.apk
 
       - name: Calculate SHA-256 Checksums
         run: |
