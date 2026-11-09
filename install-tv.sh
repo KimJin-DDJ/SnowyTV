@@ -45,10 +45,10 @@ state=$("$adb" -s "$serial" get-state 2>/dev/null) || fail "设备 $serial 未�
 abis=$("$adb" -s "$serial" shell getprop ro.product.cpu.abilist | tr -d '\r')
 
 target_abi="armeabi-v7a"
-expected_sha256=""
+expected_sha256="76dbbef3946aa3653d1c8ac0519728138bc39c769687ca1a5a04b070c01334c0"
 if [[ ",$abis," == *,arm64-v8a,* ]]; then
   target_abi="arm64-v8a"
-  expected_sha256=""
+  expected_sha256="3b066b74b9273c14520ef0d91130f59f9d9dc298070ce8e095799acbd0d954e0"
 fi
 
 apk_filename="SnowyTV-v${version}-${target_abi}.apk"
