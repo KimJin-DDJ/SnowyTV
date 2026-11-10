@@ -60,14 +60,17 @@ class _SourceSheetView extends StatefulWidget {
 
 class _SourceSheetViewState extends State<_SourceSheetView> {
   final _scrollController = ScrollController();
+  final _initialSourceFocus = FocusNode(debugLabel: 'initial source dropdown');
   final _display = <String, _SourceDisplay>{};
   final _headerKeys = <String, GlobalKey>{};
   bool _autoExpansionHandled = false;
+  bool _initialFocusHandled = false;
 
   @override
   void initState() {
     super.initState();
     _autoExpandFirstResult();
+    _focusInitialSource();
   }
 
   @override
@@ -77,6 +80,23 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
     _display.removeWhere((name, _) => !names.contains(name));
     _headerKeys.removeWhere((name, _) => !names.contains(name));
     _autoExpandFirstResult();
+    _focusInitialSource();
+  }
+
+  void _focusInitialSource() {
+    if (_initialFocusHandled || widget.groups.isEmpty) {
+      return;
+    }
+    _initialFocusHandled = true;
+    unawaited(_requestInitialSourceFocus());
+  }
+
+  Future<void> _requestInitialSourceFocus() async {
+    if (!await PlatformEnvironmentService.isAndroidTv() || !mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+      _initialSourceFocus.requestFocus();
+    }
   }
 
   void _autoExpandFirstResult() {
@@ -89,6 +109,7 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _initialSourceFocus.dispose();
     super.dispose();
   }
 
@@ -211,6 +232,9 @@ class _SourceSheetViewState extends State<_SourceSheetView> {
                   child: Material(
                     type: MaterialType.transparency,
                     child: InkWell(
+                      focusNode: group == widget.groups.first
+                          ? _initialSourceFocus
+                          : null,
                       borderRadius: BorderRadius.circular(16),
                       onTap: toggle,
                       child: ConstrainedBox(
