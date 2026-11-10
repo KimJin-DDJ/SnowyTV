@@ -38,7 +38,7 @@ class PlayerContentTabs extends StatelessWidget {
         },
         tabs: [
           Tab(text: '选集', height: height),
-          Tab(text: '评论', height: height),
+          Tab(text: '本集评论', height: height),
         ],
       ),
     );

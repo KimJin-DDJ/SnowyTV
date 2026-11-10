@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/pages/collect/collect_controller.dart';
 import 'package:kazumi/repositories/collect_crud_repository.dart';
+import 'package:kazumi/request/apis/bangumi_api.dart';
 import 'package:kazumi/request/clients/bangumi_client.dart';
 import 'package:kazumi/request/core/dio_factory.dart';
 import 'package:kazumi/request/core/network_exception.dart';
@@ -123,6 +124,45 @@ void main() {
     expect(adapter.requests.first.headers, contains('X-Signature'));
     expect(adapter.requests.last.headers, isNot(contains('X-Signature')));
     expect(adapter.requests.last.data, body);
+  });
+
+  test('Bangumi episode comments resolve the displayed episode number', () async {
+    await GStorage.putSetting(SettingsKeys.bangumiAcceleration, 'direct');
+    addTearDown(
+      () => GStorage.putSetting(SettingsKeys.bangumiAcceleration, ''),
+    );
+    adapter.respond = (_) async => _json({
+      'total': 4,
+      'data': [
+        {'id': 1760796, 'sort': 105, 'type': 0},
+        {'id': 1760797, 'sort': 106, 'type': 0},
+        {'id': 1760798, 'sort': 107, 'type': 0},
+        {'id': 1760799, 'sort': 108, 'type': 0},
+      ],
+    });
+
+    final episode = await BangumiApi.resolveBangumiEpisodeByID(712000, 108);
+    expect(episode.id, 1760799);
+    expect(adapter.requests.single.queryParameters['offset'], 0);
+  });
+
+  test('comments rejected by the mirror retry once via Bangumi', () async {
+    await GStorage.putSetting(SettingsKeys.bangumiAcceleration, 'mirror');
+    addTearDown(
+      () => GStorage.putSetting(SettingsKeys.bangumiAcceleration, ''),
+    );
+    const url = 'https://next.bgm.tv/p1/episodes/1760799/comments';
+    adapter.respond = (request) async => request.uri.host == 'api.kazumi.fyi'
+        ? _json({}, status: 401)
+        : _json([]);
+
+    expect(await BangumiClient.instance.get(url), isEmpty);
+    expect(adapter.requests.map((request) => request.uri.host), [
+      'api.kazumi.fyi',
+      'next.bgm.tv',
+    ]);
+    expect(adapter.requests.first.headers, contains('X-Signature'));
+    expect(adapter.requests.last.headers, isNot(contains('X-Signature')));
   });
 
   test('failed draft validation preserves credentials and connected account',

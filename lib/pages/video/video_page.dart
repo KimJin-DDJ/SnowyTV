@@ -71,6 +71,7 @@ class _VideoPageState extends State<VideoPage>
   final _episodePanelKey = GlobalKey<EpisodeSelectionPanelState>();
   final _sidePanelKey = GlobalKey<VideoSidePanelState>();
   late TabController tabController;
+  int _contentTabIndex = 0;
 
   late final bool disableAnimations;
 
@@ -87,6 +88,7 @@ class _VideoPageState extends State<VideoPage>
     windowManager.addListener(this);
 
     tabController = TabController(length: 2, vsync: this);
+    tabController.addListener(_onContentTabChanged);
 
     playResume = GStorage.getSetting(SettingsKeys.playResume);
     disableAnimations = GStorage.getSetting(
@@ -244,6 +246,7 @@ class _VideoPageState extends State<VideoPage>
     }
     unawaited(videoPageController.fullscreen.close());
     keyboardFocus.dispose();
+    tabController.removeListener(_onContentTabChanged);
     tabController.dispose();
     TimedShutdownService().cancel();
     super.dispose();
@@ -301,6 +304,12 @@ class _VideoPageState extends State<VideoPage>
   }
 
   void _toggleSidePanel() => _sidePanelKey.currentState?.toggle();
+
+  void _onContentTabChanged() {
+    if (_contentTabIndex == tabController.index) return;
+    _contentTabIndex = tabController.index;
+    if (mounted) setState(() {});
+  }
 
   void _closeSidePanel() => _sidePanelKey.currentState?.close();
 
@@ -612,6 +621,7 @@ class _VideoPageState extends State<VideoPage>
                   episode: episodeNum,
                   selection: videoPageController.selectedEpisode,
                   videoPageController: videoPageController,
+                  isActive: tabController.index == 1,
                 ),
               ],
             ),

@@ -401,11 +401,16 @@ abstract class _VideoPageController with Store implements Disposable {
 
   @action
   void _applyResolvedSelection(EpisodeRef resolvedEpisode) {
+    final previousCommentsEpisode = commentsEpisode;
     selectedEpisode = VideoEpisodeSelection(
       episode: resolvedEpisode.listIndex,
       road: resolvedEpisode.roadIndex,
     );
-    commentsEpisode = commentEpisodeForSelection(selectedEpisode);
+    final nextCommentsEpisode = commentEpisodeForSelection(selectedEpisode);
+    commentsEpisode = nextCommentsEpisode;
+    if (nextCommentsEpisode != previousCommentsEpisode) {
+      _resetEpisodeComments();
+    }
   }
 
   @action
@@ -865,15 +870,20 @@ abstract class _VideoPageController with Store implements Disposable {
 
   void _resetEpisodeComments() {
     _commentSessions.cancel();
-    episodeInfo.reset();
+    episodeInfo = EpisodeInfo.fromTemplate();
     episodeCommentsList.clear();
   }
 
-  Future<bool> queryBangumiEpisodeCommentsByID(int id, int episode) async {
+  Future<bool> queryBangumiEpisodeCommentsByID(
+    int id,
+    int episode, {
+    EpisodeInfo? pickedEpisode,
+  }) async {
     final session = _commentSessions.begin();
     final EpisodeInfo latestEpisodeInfo;
     try {
-      latestEpisodeInfo = await BangumiApi.getBangumiEpisodeByID(id, episode);
+      latestEpisodeInfo = pickedEpisode ??
+          await BangumiApi.resolveBangumiEpisodeByID(id, episode);
     } catch (_) {
       if (session.isStale) {
         return false;
@@ -882,6 +892,10 @@ abstract class _VideoPageController with Store implements Disposable {
     }
     if (session.isStale) {
       return false;
+    }
+    if (latestEpisodeInfo.id <= 0) {
+      _applyEpisodeComments(episode, latestEpisodeInfo, const []);
+      return true;
     }
     final EpisodeCommentResponse value;
     try {

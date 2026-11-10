@@ -23,21 +23,38 @@ class BangumiClient {
     String? accessToken,
     CancelToken? cancelToken,
   }) async {
-    try {
-      final response = await DioFactory.bangumiDio.get(
+    Future<Response<dynamic>> send({bool direct = false}) {
+      return DioFactory.bangumiDio.get(
         url,
         queryParameters: queryParameters,
         options: Options(
+          extra: {
+            if (direct) BangumiAccelerationInterceptor.directRequestKey: true,
+          },
           headers: _headers(
             requiresAuth: requiresAuth,
             accessToken: accessToken,
             url: url,
             method: 'GET',
+            signMirror: !direct,
           ),
         ),
         cancelToken: cancelToken,
       );
-      return response.data;
+    }
+
+    try {
+      try {
+        return (await send()).data;
+      } on DioException catch (error) {
+        final status = error.response?.statusCode;
+        if ((status != 401 && status != 403) ||
+            error.requestOptions.uri.origin != ApiEndpoints.bangumiMirrorDomain ||
+            !_isCommentRequest(Uri.parse(url))) {
+          rethrow;
+        }
+        return (await send(direct: true)).data;
+      }
     } on DioException catch (e) {
       throw await NetworkErrorMapper.mapException(e);
     }
@@ -133,11 +150,15 @@ class BangumiClient {
     if (method == 'POST' && path == '/v0/search/subjects') {
       return true;
     }
-    if (method != 'GET') {
-      return false;
-    }
-    return path.startsWith('/p1/subjects/') && path.endsWith('/comments') ||
-        path.startsWith('/p1/episodes/') && path.endsWith('/comments') ||
-        path.startsWith('/p1/characters/') && path.endsWith('/comments');
+    return method == 'GET' && _isCommentRequest(uri);
+  }
+
+  static bool _isCommentRequest(Uri uri) {
+    final path = uri.path;
+    return ApiEndpoints.bangumiPublicApiHosts.contains(uri.host) &&
+        path.endsWith('/comments') &&
+        (path.startsWith('/p1/subjects/') ||
+            path.startsWith('/p1/episodes/') ||
+            path.startsWith('/p1/characters/'));
   }
 }

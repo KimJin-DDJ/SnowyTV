@@ -6,10 +6,12 @@ class EpisodeCommentsPicker extends StatelessWidget {
     super.key,
     required this.episodes,
     required this.selectedEpisode,
+    required this.selectedEpisodeId,
   });
 
   final List<EpisodeInfo> episodes;
   final int selectedEpisode;
+  final int selectedEpisodeId;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +53,9 @@ class EpisodeCommentsPicker extends StatelessWidget {
                   final info = episodes[index];
                   final title =
                       info.nameCn.isNotEmpty ? info.nameCn : info.name;
-                  final selected = index + 1 == selectedEpisode;
+                  final selected = selectedEpisodeId > 0
+                      ? info.id == selectedEpisodeId
+                      : info.type == 0 && info.episode == selectedEpisode;
                   return Material(
                     color: selected
                         ? colors.primaryContainer
@@ -91,7 +95,7 @@ class EpisodeCommentsPicker extends StatelessWidget {
                         color:
                             selected ? colors.primary : colors.onSurfaceVariant,
                       ),
-                      onTap: () => Navigator.pop(context, index + 1),
+                      onTap: () => Navigator.pop(context, info),
                     ),
                   );
                 },

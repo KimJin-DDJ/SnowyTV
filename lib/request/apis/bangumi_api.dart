@@ -405,22 +405,47 @@ class BangumiApi {
   }
 
   static Future<EpisodeInfo> getBangumiEpisodeByID(int id, int episode) async {
-    EpisodeInfo episodeInfo = EpisodeInfo.fromTemplate();
-    var params = <String, dynamic>{
-      'subject_id': id,
-      'offset': episode - 1,
-      'limit': 1
-    };
     try {
-      final jsonData = await _client.get(
-        ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiEpisodeByID,
-        queryParameters: params,
-      );
-      episodeInfo = EpisodeInfo.fromJson(jsonData['data'][0]);
+      return await resolveBangumiEpisodeByID(id, episode);
     } catch (e) {
       KazumiLogger().e('Network: resolve bangumi episode failed', error: e);
+      return EpisodeInfo.fromTemplate();
     }
-    return episodeInfo;
+  }
+
+  /// Resolves the episode whose Bangumi `sort` matches the displayed number.
+  /// This strict variant propagates network failures to the comments view.
+  static Future<EpisodeInfo> resolveBangumiEpisodeByID(
+      int id, int episode) async {
+    final empty = EpisodeInfo.fromTemplate();
+    if (id <= 0 || episode <= 0) return empty;
+
+    // Bangumi's sort number is not necessarily the record's zero-based offset.
+    const limit = 100;
+    var offset = 0;
+    int? total;
+    while (true) {
+      final jsonData = await _client.get(
+        ApiEndpoints.bangumiAPIDomain + ApiEndpoints.bangumiEpisodeByID,
+        queryParameters: {
+          'subject_id': id,
+          'offset': offset,
+          'limit': limit,
+        },
+      );
+      total ??= jsonData['total'] as int?;
+      final data = jsonData['data'] as List<dynamic>? ?? const [];
+      for (final item in data) {
+        if (item is Map<String, dynamic>) {
+          final info = EpisodeInfo.fromJson(item);
+          if (info.episode == episode) return info;
+        }
+      }
+      if (data.isEmpty || data.length < limit) break;
+      offset += data.length;
+      if (total != null && offset >= total) break;
+    }
+    return empty;
   }
 
   static Future<List<EpisodeInfo>> getBangumiEpisodesByID(int id) async {
@@ -469,6 +494,9 @@ class BangumiApi {
 
   static Future<EpisodeCommentResponse> getBangumiCommentsByEpisodeID(
       int id) async {
+    if (id <= 0) {
+      throw ArgumentError.value(id, 'id', 'Bangumi episode ID must be positive');
+    }
     final jsonData = await _client.get(
       ApiEndpoints.formatUrl(
           ApiEndpoints.bangumiAPINextDomain +

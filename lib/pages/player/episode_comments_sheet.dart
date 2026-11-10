@@ -8,6 +8,7 @@ import 'package:kazumi/pages/player/episode_comments_picker.dart';
 import 'package:kazumi/pages/player/episode_comments_view.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/request/apis/bangumi_api.dart';
+import 'package:kazumi/services/platform/platform_environment_service.dart';
 
 class EpisodeCommentsSheet extends StatefulWidget {
   const EpisodeCommentsSheet({
@@ -15,11 +16,13 @@ class EpisodeCommentsSheet extends StatefulWidget {
     required this.videoPageController,
     required this.episode,
     required this.selection,
+    required this.isActive,
   });
 
   final VideoPageController videoPageController;
   final int episode;
   final VideoEpisodeSelection selection;
+  final bool isActive;
 
   @override
   State<EpisodeCommentsSheet> createState() => _EpisodeCommentsSheetState();
@@ -29,30 +32,35 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
     with KazumiDialogOwner {
   VideoPageController get _controller => widget.videoPageController;
   late int _selectedEpisode;
+  EpisodeInfo? _pickedEpisode;
   bool _isLoading = false;
   bool _hasError = false;
+  bool _isAndroidTv = false;
+  bool _hasLoadedCurrentEpisode = false;
   int _requestVersion = 0;
-  final Map<int, EpisodeInfo> _episodeInfoByIndex = {};
 
   @override
   void initState() {
     super.initState();
+    unawaited(PlatformEnvironmentService.isAndroidTv().then((value) {
+      if (mounted) setState(() => _isAndroidTv = value);
+    }).catchError((Object _) {}));
     _resetAndScheduleRefresh();
   }
 
   @override
   void didUpdateWidget(covariant EpisodeCommentsSheet oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final becameActive = !oldWidget.isActive && widget.isActive;
     final controllerChanged =
         oldWidget.videoPageController != widget.videoPageController;
-    if (controllerChanged) {
-      _episodeInfoByIndex.clear();
-    }
     if (oldWidget.selection != widget.selection ||
         controllerChanged ||
         (oldWidget.episode != widget.episode &&
             widget.episode != _selectedEpisode)) {
       _resetAndScheduleRefresh();
+    } else if (becameActive && !_hasLoadedCurrentEpisode && !_isLoading) {
+      _scheduleRefresh();
     }
   }
 
@@ -60,16 +68,24 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
     dialogs.cancel();
     final version = ++_requestVersion;
     _selectedEpisode = widget.episode;
+    _pickedEpisode = null;
     _hasError = false;
-    _isLoading = _controller.commentsEpisode != _selectedEpisode ||
-        _controller.episodeCommentsList.isEmpty;
-    if (_isLoading) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && version == _requestVersion) {
-          unawaited(_loadComments());
-        }
-      });
+    _isLoading = false;
+    _hasLoadedCurrentEpisode =
+        _controller.commentsEpisode == _selectedEpisode &&
+            _controller.episodeCommentsList.isNotEmpty;
+    if (widget.isActive && !_hasLoadedCurrentEpisode) {
+      _scheduleRefresh(version);
     }
+  }
+
+  void _scheduleRefresh([int? requestVersion]) {
+    final version = requestVersion ?? ++_requestVersion;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.isActive && version == _requestVersion) {
+        unawaited(_loadComments());
+      }
+    });
   }
 
   Future<void> _loadComments() async {
@@ -80,11 +96,16 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
     });
     try {
       final applied = await _controller.queryBangumiEpisodeCommentsByID(
-          _controller.bangumiItem.id, _selectedEpisode);
-      if (!mounted || version != _requestVersion || !applied) return;
-      if (_controller.episodeInfo.id != 0) {
-        _rememberEpisodeInfo(_selectedEpisode, _controller.episodeInfo);
+        _controller.bangumiItem.id,
+        _selectedEpisode,
+        pickedEpisode: _pickedEpisode,
+      );
+      if (!mounted || version != _requestVersion) return;
+      if (!applied) {
+        setState(() => _isLoading = false);
+        return;
       }
+      _hasLoadedCurrentEpisode = true;
       setState(() => _isLoading = false);
     } catch (_) {
       if (!mounted || version != _requestVersion) return;
@@ -93,17 +114,6 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
         _hasError = true;
       });
     }
-  }
-
-  void _rememberEpisodeInfo(int index, EpisodeInfo info) {
-    // Playback resets the controller's EpisodeInfo in place when switching.
-    _episodeInfoByIndex[index] = EpisodeInfo(
-      id: info.id,
-      episode: info.episode,
-      type: info.type,
-      name: info.name,
-      nameCn: info.nameCn,
-    );
   }
 
   Future<void> _showEpisodeSelection() async {
@@ -119,17 +129,19 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
         KazumiDialog.showToast(message: '未找到分集列表');
         return;
       }
-      for (var index = 0; index < episodes.length; index++) {
-        _rememberEpisodeInfo(index + 1, episodes[index]);
-      }
-      final selected = await task.show<int>(
+      final selected = await task.show<EpisodeInfo>(
         builder: (context) => EpisodeCommentsPicker(
           episodes: episodes,
           selectedEpisode: _selectedEpisode,
+          selectedEpisodeId: _pickedEpisode?.id ?? _controller.episodeInfo.id,
         ),
       );
-      if (selected == _selectedEpisode) return;
-      _selectedEpisode = selected;
+      if (selected.id == (_pickedEpisode?.id ?? _controller.episodeInfo.id)) {
+        return;
+      }
+      _pickedEpisode = selected;
+      _selectedEpisode = selected.episode.toInt();
+      _hasLoadedCurrentEpisode = false;
       unawaited(_loadComments());
     }, errorMessage: '分集列表加载失败，请稍后重试');
   }
@@ -137,20 +149,24 @@ class _EpisodeCommentsSheetState extends State<EpisodeCommentsSheet>
   @override
   Widget build(BuildContext context) {
     return Observer(builder: (context) {
-      final matchesEpisode = _controller.commentsEpisode == _selectedEpisode;
-      final comments = _controller.episodeCommentsList.toList();
+      final picked = _pickedEpisode;
+      final matchesEpisode = picked != null
+          ? _controller.episodeInfo.id == picked.id
+          : _controller.commentsEpisode == _selectedEpisode;
       return EpisodeCommentsView(
         episode: _selectedEpisode,
-        episodeInfo: matchesEpisode && _controller.episodeInfo.id != 0
-            ? _controller.episodeInfo
-            : _episodeInfoByIndex[_selectedEpisode],
-        comments: matchesEpisode ? comments : [],
+        episodeInfo: picked ??
+            (matchesEpisode && _controller.episodeInfo.id != 0
+                ? _controller.episodeInfo
+                : null),
+        comments: matchesEpisode ? _controller.episodeCommentsList.toList() : [],
         isLoading: _isLoading,
         hasError: _hasError,
         isAscending: _controller.isCommentsAscending,
         onToggleSort: _controller.toggleSortOrder,
         onSelectEpisode: _showEpisodeSelection,
         onRefresh: _loadComments,
+        isAndroidTv: _isAndroidTv,
       );
     });
   }

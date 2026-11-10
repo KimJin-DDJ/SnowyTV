@@ -1,7 +1,9 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:kazumi/bean/card/user_comments_card.dart';
+import 'package:kazumi/bean/widget/tv_focus_overlay.dart';
 import 'package:kazumi/bean/widget/error_widget.dart';
 import 'package:kazumi/bean/widget/empty_state_widget.dart';
 import 'package:kazumi/bean/widget/loading_indicator.dart';
@@ -20,6 +22,7 @@ class EpisodeCommentsView extends StatelessWidget {
     required this.onToggleSort,
     required this.onSelectEpisode,
     required this.onRefresh,
+    required this.isAndroidTv,
   });
 
   final int episode;
@@ -31,6 +34,7 @@ class EpisodeCommentsView extends StatelessWidget {
   final VoidCallback onToggleSort;
   final VoidCallback onSelectEpisode;
   final VoidCallback onRefresh;
+  final bool isAndroidTv;
 
   @override
   Widget build(BuildContext context) {
@@ -41,8 +45,8 @@ class EpisodeCommentsView extends StatelessWidget {
         final gutter = constraints.maxWidth > 760
             ? (constraints.maxWidth - 728) / 2
             : 16.0;
-        return CustomScrollView(
-          key: ValueKey(episode),
+        Widget buildScroll(ScrollController? controller) => CustomScrollView(
+          controller: controller,
           scrollBehavior: const ScrollBehavior().copyWith(
             scrollbars: false,
             dragDevices: {
@@ -114,15 +118,19 @@ class EpisodeCommentsView extends StatelessWidget {
                 padding: EdgeInsets.symmetric(horizontal: gutter),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => KeepAlive(
-                      // Retain BBCode image geometry and expanded discussions.
-                      key: ObjectKey(comments[index]),
-                      keepAlive: true,
-                      child: IndexedSemantics(
-                        index: index,
-                        child: UserCommentsCard.episode(comments[index]),
-                      ),
-                    ),
+                    (context, index) => isAndroidTv
+                        ? _EpisodeCommentRow(
+                            key: ObjectKey(comments[index]),
+                            comment: comments[index],
+                          )
+                        : KeepAlive(
+                            key: ObjectKey(comments[index]),
+                            keepAlive: true,
+                            child: IndexedSemantics(
+                              index: index,
+                              child: UserCommentsCard.episode(comments[index]),
+                            ),
+                          ),
                     childCount: comments.length,
                     findChildIndexCallback: (key) {
                       final index = comments.indexOf(
@@ -152,6 +160,12 @@ class EpisodeCommentsView extends StatelessWidget {
             ),
           ],
         );
+        return isAndroidTv
+            ? _DpadEpisodeCommentsScroll(
+                resetKey: episode,
+                builder: buildScroll,
+              )
+            : buildScroll(null);
       }),
     );
   }
@@ -221,6 +235,173 @@ class EpisodeCommentsView extends StatelessWidget {
       return Row(children: [title, const Spacer(), actions]);
     });
   }
+}
+
+class _EpisodeCommentRow extends StatelessWidget {
+  const _EpisodeCommentRow({
+    super.key,
+    required this.comment,
+  });
+
+  final EpisodeCommentItem comment;
+
+  String _plainText(String value) => value
+      .replaceAll(
+        RegExp(r'\[img\].*?\[/img\]', caseSensitive: false, dotAll: true),
+        '[图片]',
+      )
+      .replaceAll(RegExp(r'\[/?[a-zA-Z]+(?:=[^\]]*)?\]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final comment = this.comment.comment;
+    final author = comment.user.nickname.isNotEmpty
+        ? comment.user.nickname
+        : comment.user.username;
+    final body = _plainText(comment.comment);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 10),
+      child: Container(
+          decoration: BoxDecoration(
+            color: colors.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(author,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w700,
+                      )),
+              const SizedBox(height: 8),
+              Text(
+                body.isEmpty ? '该评论没有可显示的文字' : body,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: colors.onSurface,
+                      height: 1.5,
+                    ),
+              ),
+              if (this.comment.replies.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  this.comment.replies
+                      .take(2)
+                      .map((reply) {
+                        final name = reply.user.nickname.isNotEmpty
+                            ? reply.user.nickname
+                            : reply.user.username;
+                        return '$name：${_plainText(reply.comment)}';
+                      })
+                      .join('\n'),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        height: 1.5,
+                      ),
+                ),
+                if (this.comment.replies.length > 2)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '另有 ${this.comment.replies.length - 2} 条回复',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+      ),
+    );
+  }
+}
+
+class _DpadEpisodeCommentsScroll extends StatefulWidget {
+  const _DpadEpisodeCommentsScroll({
+    required this.resetKey,
+    required this.builder,
+  });
+
+  final Object resetKey;
+  final Widget Function(ScrollController controller) builder;
+
+  @override
+  State<_DpadEpisodeCommentsScroll> createState() =>
+      _DpadEpisodeCommentsScrollState();
+}
+
+class _DpadEpisodeCommentsScrollState
+    extends State<_DpadEpisodeCommentsScroll> {
+  final _controller = ScrollController();
+  final _focusNode = FocusNode(debugLabel: 'Episode comments scroll');
+
+  @override
+  void initState() {
+    super.initState();
+    TvFocusOverlay.excludeFrame(_focusNode);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DpadEpisodeCommentsScroll oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.resetKey != widget.resetKey && _controller.hasClients) {
+      _controller.jumpTo(_controller.position.minScrollExtent);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final down = event.logicalKey == LogicalKeyboardKey.arrowDown;
+    if (!down && event.logicalKey != LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    if (!_controller.hasClients) return KeyEventResult.ignored;
+    final position = _controller.position;
+    final atEdge = down
+        ? position.pixels >= position.maxScrollExtent - 1
+        : position.pixels <= position.minScrollExtent + 1;
+    if (atEdge) return KeyEventResult.ignored;
+    if (!node.hasPrimaryFocus) {
+      final focused = FocusManager.instance.primaryFocus;
+      // Keep normal traversal between the episode picker and toolbar. Once
+      // past the last row of buttons, hand Down to the scroll viewport.
+      if (down &&
+          focused != null &&
+          node.traversalDescendants.any(
+            (child) => child.rect.center.dy > focused.rect.center.dy + 1,
+          )) {
+        return KeyEventResult.ignored;
+      }
+      node.requestFocus();
+    }
+    final target = (position.pixels + (down ? 220.0 : -220.0))
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    _controller.animateTo(
+      target,
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+    );
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+        focusNode: _focusNode,
+        onKeyEvent: _onKey,
+        child: widget.builder(_controller),
+      );
 }
 
 class _EpisodeHeader extends StatelessWidget {
