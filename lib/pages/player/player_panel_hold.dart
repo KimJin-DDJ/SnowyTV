@@ -126,12 +126,14 @@ class PlayerPanelHoldMenuAnchor extends StatefulWidget {
     required this.onVisibilityChanged,
     required this.builder,
     required this.menuChildren,
+    this.style,
   });
 
   final PlayerPanelHold Function() acquirePlayerPanelHold;
   final ValueChanged<bool> onVisibilityChanged;
   final KazumiMenuBuilder builder;
   final List<Widget> menuChildren;
+  final MenuStyle? style;
 
   @override
   State<PlayerPanelHoldMenuAnchor> createState() =>
@@ -172,6 +174,7 @@ class _PlayerPanelHoldMenuAnchorState extends State<PlayerPanelHoldMenuAnchor> {
       animated: false,
       onOpen: _handleOpen,
       onClose: _handleClose,
+      style: widget.style,
       builder: widget.builder,
       menuChildren: widget.menuChildren,
     );

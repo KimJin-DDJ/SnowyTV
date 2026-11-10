@@ -13,6 +13,7 @@ import 'package:kazumi/pages/player/controller/player_aspect_ratio.dart';
 import 'package:kazumi/pages/player/controller/player_super_resolution.dart';
 import 'package:kazumi/bean/widget/embedded_native_control_area.dart';
 import 'package:kazumi/pages/player/player_panel_hold.dart';
+import 'package:kazumi/services/platform/platform_environment_service.dart';
 import 'package:kazumi/services/player/pip_utils.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
@@ -95,6 +96,9 @@ class PlayerItemPanel extends StatefulWidget {
 }
 
 class _PlayerItemPanelState extends State<PlayerItemPanel> {
+  bool? _isAndroidTv = defaultTargetPlatform == TargetPlatform.android
+      ? null
+      : false;
   late final Animation<Offset> _topOffsetAnimation;
   late final Animation<Offset> _bottomOffsetAnimation;
   late final Animation<Offset> _rightOffsetAnimation;
@@ -300,6 +304,13 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   void initState() {
     super.initState();
     playerController = widget.playerController;
+    if (_isAndroidTv == null) {
+      unawaited(PlatformEnvironmentService.isAndroidTv()
+          .onError((_, _) => false)
+          .then((isTv) {
+        if (mounted) setState(() => _isAndroidTv = isTv);
+      }));
+    }
     final visibility = widget.panelVisibilityController.drive(
       CurveTween(curve: Curves.easeInOut),
     );
@@ -395,16 +406,17 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: _buildScrim(
-            height: 50,
-            colors: const [Colors.black45, Colors.transparent],
-            offset: _topOffsetAnimation,
+        if (_isAndroidTv == false)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildScrim(
+              height: 50,
+              colors: const [Colors.black45, Colors.transparent],
+              offset: _topOffsetAnimation,
+            ),
           ),
-        ),
         Positioned(
           bottom: 0,
           left: 0,
@@ -497,30 +509,31 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
               },
             ),
           ),
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: Observer(
-            builder: (context) {
-              return Visibility(
-                visible:
-                    !playerController.panel.lockPanel &&
-                    (widget.disableAnimations
-                        ? playerController.panel.showVideoController
-                        : true),
-                child: _excludeHiddenControls(
-                  widget.disableAnimations
-                      ? _buildTopControls(compact)
-                      : SlideTransition(
-                          position: _topOffsetAnimation,
-                          child: _buildTopControls(compact),
-                        ),
-                ),
-              );
-            },
+        if (_isAndroidTv == false)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Observer(
+              builder: (context) {
+                return Visibility(
+                  visible:
+                      !playerController.panel.lockPanel &&
+                      (widget.disableAnimations
+                          ? playerController.panel.showVideoController
+                          : true),
+                  child: _excludeHiddenControls(
+                    widget.disableAnimations
+                        ? _buildTopControls(compact)
+                        : SlideTransition(
+                            position: _topOffsetAnimation,
+                            child: _buildTopControls(compact),
+                          ),
+                  ),
+                );
+              },
+            ),
           ),
-        ),
         Positioned(
           bottom: 0,
           left: 0,
@@ -817,7 +830,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
           ),
         ),
         controls: compact ? const SizedBox.shrink() : _wideControls,
-        fullscreen: _buildFullscreenButton(compact),
+        fullscreen: _isAndroidTv == true
+            ? _buildMoreMenu(compact)
+            : _buildFullscreenButton(compact),
       ),
     ),
   );
@@ -983,118 +998,141 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                 acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
                 bangumiItem: videoPageController.bangumiItem,
               ),
-              PlayerPanelHoldMenuAnchor(
-                acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
-                onVisibilityChanged: widget.onMenuVisibilityChanged,
-                builder: (context, toggle) {
-                  return IconButton(
-                    onPressed: toggle,
-                    tooltip: '更多选项',
-                    icon: const Icon(Icons.more_vert, color: Colors.white),
-                  );
-                },
-                menuChildren: [
-                  if (compact) ...[
-                    SubmenuButton(
-                      menuChildren: _aspectRatioItems,
-                      child: const Text('视频比例'),
-                    ),
-                    SubmenuButton(
-                      menuChildren: _speedItems,
-                      child: const Text('倍速'),
-                    ),
-                    _syncPlayMenuItem,
-                  ],
-                  KazumiMenuItem(
-                    onPressed: widget.showDanmakuSwitch,
-                    label: '弹幕切换',
-                  ),
-                  if (compact) _danmakuSettingsMenuItem,
-                  KazumiMenuItem(
-                    onPressed: () => showQualityInspectorSheet(
-                      context,
-                      playerController: playerController,
-                      videoPageController: videoPageController,
-                      onSwitchRoad: widget.onToggleSidePanel,
-                    ),
-                    label: '画质检测与规格',
-                  ),
-                  KazumiMenuItem(
-                    onPressed: widget.showVideoInfo,
-                    label: '视频详情',
-                  ),
-                  KazumiMenuItem(
-                    onPressed: () {
-                      final needRestart = playerController.playback.playing;
-                      playerController.pause();
-                      RemotePlay()
-                          .castVideo(
-                            playerController.videoUrl,
-                            videoPageController.currentPlugin.referer,
-                          )
-                          .whenComplete(() {
-                            if (mounted && needRestart) {
-                              playerController.play();
-                            }
-                          });
-                    },
-                    label: '远程投屏',
-                  ),
-                  KazumiMenuItem(
-                    onPressed: playerController.launchExternalPlayer,
-                    label: '外部播放',
-                  ),
-                  SubmenuButton(
-                    menuChildren: [
-                      KazumiMenuItem(
-                        onPressed: TimedShutdownService().cancel,
-                        label: '不开启',
-                        selected: !TimedShutdownService().isActive,
-                      ),
-                      for (final int minutes in [15, 30, 60])
-                        KazumiMenuItem(
-                          onPressed: () {
-                            TimedShutdownService().start(
-                              minutes,
-                              onExpired: widget.pauseForTimedShutdown,
-                            );
-                            KazumiDialog.showToast(
-                              message:
-                                  '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭',
-                            );
-                          },
-                          label: '$minutes 分钟',
-                          selected:
-                              TimedShutdownService().setMinutes == minutes,
-                        ),
-                      KazumiMenuItem(
-                        onPressed: () {
-                          TimedShutdownService.showCustomTimerDialog(
-                            onExpired: widget.pauseForTimedShutdown,
-                          );
-                        },
-                        label: '自定义',
-                      ),
-                    ],
-                    child: ValueListenableBuilder<int>(
-                      valueListenable:
-                          TimedShutdownService().remainingSecondsNotifier,
-                      builder: (context, remainingSeconds, _) => Text(
-                        remainingSeconds > 0
-                            ? "定时关闭 (${TimedShutdownService().formatRemainingTime()})"
-                            : "定时关闭",
-                      ),
-                    ),
-                  ),
-                  if (!compact) _syncPlayMenuItem,
-                ],
-              ),
+              _buildMoreMenu(compact),
             ],
           ),
         ),
       ),
     );
   }
+
+  Widget _buildMoreMenu(bool compact) => PlayerPanelHoldMenuAnchor(
+    acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
+    onVisibilityChanged: widget.onMenuVisibilityChanged,
+    style: _isAndroidTv == true
+        ? MenuStyle(
+            maximumSize: WidgetStatePropertyAll(
+              Size(320, MediaQuery.sizeOf(context).height * 0.75),
+            ),
+          )
+        : null,
+    builder: (context, toggle) {
+      return IconButton(
+        onPressed: toggle,
+        tooltip: '更多选项',
+        icon: const Icon(Icons.more_vert, color: Colors.white),
+      );
+    },
+    menuChildren: [
+      if (_isAndroidTv == true) ...[
+        KazumiMenuItem(
+          onPressed: widget.skipOP,
+          label: '快进 ${playerController.playback.buttonSkipTime} 秒',
+        ),
+        KazumiMenuItem(
+          onPressed: _showForwardChange,
+          label: '设置快进秒数',
+        ),
+        KazumiMenuItem(
+          onPressed: widget.enterAndroidPictureInPicture,
+          label: '画中画',
+        ),
+      ],
+      if (compact) ...[
+        SubmenuButton(
+          menuChildren: _aspectRatioItems,
+          child: const Text('视频比例'),
+        ),
+        SubmenuButton(
+          menuChildren: _speedItems,
+          child: const Text('倍速'),
+        ),
+        _syncPlayMenuItem,
+      ],
+      KazumiMenuItem(
+        onPressed: widget.showDanmakuSwitch,
+        label: '弹幕切换',
+      ),
+      if (compact) _danmakuSettingsMenuItem,
+      KazumiMenuItem(
+        onPressed: () => showQualityInspectorSheet(
+          context,
+          playerController: playerController,
+          videoPageController: videoPageController,
+          onSwitchRoad: widget.onToggleSidePanel,
+        ),
+        label: '画质检测与规格',
+      ),
+      KazumiMenuItem(
+        onPressed: widget.showVideoInfo,
+        label: '视频详情',
+      ),
+      KazumiMenuItem(
+        onPressed: () {
+          final needRestart = playerController.playback.playing;
+          playerController.pause();
+          RemotePlay()
+              .castVideo(
+                playerController.videoUrl,
+                videoPageController.currentPlugin.referer,
+              )
+              .whenComplete(() {
+                if (mounted && needRestart) {
+                  playerController.play();
+                }
+              });
+        },
+        label: '远程投屏',
+      ),
+      KazumiMenuItem(
+        onPressed: playerController.launchExternalPlayer,
+        label: '外部播放',
+      ),
+      SubmenuButton(
+        menuChildren: [
+          KazumiMenuItem(
+            onPressed: TimedShutdownService().cancel,
+            label: '不开启',
+            selected: !TimedShutdownService().isActive,
+          ),
+          for (final int minutes in [15, 30, 60])
+            KazumiMenuItem(
+              onPressed: () {
+                TimedShutdownService().start(
+                  minutes,
+                  onExpired: widget.pauseForTimedShutdown,
+                );
+                KazumiDialog.showToast(
+                  message:
+                      '已设置 ${TimedShutdownService().formatMinutesToDisplay(minutes)} 后定时关闭',
+                );
+              },
+              label: '$minutes 分钟',
+              selected:
+                  TimedShutdownService().setMinutes == minutes,
+            ),
+          KazumiMenuItem(
+            onPressed: () {
+              TimedShutdownService.showCustomTimerDialog(
+                onExpired: widget.pauseForTimedShutdown,
+              );
+            },
+            label: '自定义',
+          ),
+        ],
+        child: ValueListenableBuilder<int>(
+          valueListenable:
+              TimedShutdownService().remainingSecondsNotifier,
+          builder: (context, remainingSeconds, _) => Text(
+            remainingSeconds > 0
+                ? "定时关闭 (${TimedShutdownService().formatRemainingTime()})"
+                : "定时关闭",
+          ),
+        ),
+      ),
+      if (!compact) _syncPlayMenuItem,
+    ],
+  );
 
   Widget get _rightControls {
     return SafeArea(
