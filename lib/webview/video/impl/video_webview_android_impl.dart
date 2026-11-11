@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:kazumi/request/core/plugin_network_support.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/logging/logger.dart';
+import 'package:kazumi/services/video_source/video_source_format.dart';
 import 'package:kazumi/webview/video/video_webview_controller.dart';
 import 'package:flutter_inappwebview_platform_interface/flutter_inappwebview_platform_interface.dart';
 import 'package:flutter_inappwebview_android/flutter_inappwebview_android.dart'
@@ -41,13 +43,39 @@ class VideoWebviewAndroidImpl
           initEventController.add(true);
         },
         shouldInterceptRequest: (controller, request) async {
-          if (useLegacyParser || isVideoSourceLoaded) return null;
-          final url = request.url.toString();
-          final lower = url.toLowerCase();
-          if (_isAdUrl(lower)) return null;
-          if (_isM3U8Url(lower) ||
-              _isRangeVideoRequest(lower, request.headers)) {
-            _handleVideoResolved(url, 'Native intercepted video URL');
+          if (!useLegacyParser && !isVideoSourceLoaded) {
+            final url = request.url.toString();
+            final lower = url.toLowerCase();
+            if (!_isAdUrl(lower) &&
+                (_isM3U8Url(lower) ||
+                    _isRangeVideoRequest(lower, request.headers))) {
+              _handleVideoResolved(
+                url,
+                'Native intercepted video URL',
+                format: _isM3U8Url(lower) && lower.contains('.m3u8')
+                    ? VideoSourceFormat.hls
+                    : VideoSourceFormat.auto,
+              );
+            }
+          }
+          final method = (request.method ?? 'GET').toUpperCase();
+          if ((method == 'GET' || method == 'HEAD') &&
+              PluginNetworkSupport.shouldProxyInWebView(request.url)) {
+            final fetched = await PluginNetworkSupport.fetchForWebView(
+              request.url,
+              method: method,
+              headers: request.headers ?? const {},
+            );
+            if (fetched != null && fetched.statusCode < 300) {
+              return WebResourceResponse(
+                contentType: fetched.contentType,
+                contentEncoding: fetched.contentEncoding,
+                statusCode: fetched.statusCode,
+                reasonPhrase: fetched.reasonPhrase,
+                headers: fetched.headers,
+                data: fetched.data,
+              );
+            }
           }
           return null;
         },
@@ -73,7 +101,11 @@ class VideoWebviewAndroidImpl
     await headlessWebView?.run();
   }
 
-  void _handleVideoResolved(String url, String sourceDesc) {
+  void _handleVideoResolved(
+    String url,
+    String sourceDesc, {
+    VideoSourceFormat format = VideoSourceFormat.auto,
+  }) {
     if (isVideoSourceLoaded) return;
     String cleanUrl = url.trim();
     if (cleanUrl.startsWith('//')) {
@@ -88,11 +120,9 @@ class VideoWebviewAndroidImpl
       // MacCMS 的 MacPlayer.Url 等字段是播放页自身地址，不是视频流；忽略后继续轮询。
       logEventController.add('Ignored page URL from $sourceDesc: $cleanUrl');
       KazumiLogger().d('[WebView Android] ignored page URL ($sourceDesc): $cleanUrl');
-      KazumiLogger().d('[WebView Android] ignored page URL ($sourceDesc): $cleanUrl');
       return;
     }
     logEventController.add('$sourceDesc: $cleanUrl');
-    KazumiLogger().i('[WebView Android] $sourceDesc: $cleanUrl');
     KazumiLogger().i('[WebView Android] $sourceDesc: $cleanUrl');
     isIframeLoaded = true;
     isVideoSourceLoaded = true;
@@ -100,7 +130,7 @@ class VideoWebviewAndroidImpl
     videoParserTimer?.cancel();
     videoParserTimer = null;
     unloadPage();
-    notifyVideoSourceResolved(cleanUrl);
+    notifyVideoSourceResolved(cleanUrl, format: format);
   }
 
   String? _loadingPageUrl;
@@ -174,12 +204,21 @@ class VideoWebviewAndroidImpl
       webviewController?.addJavaScriptHandler(
           handlerName: 'VideoBridgeDebug',
           callback: (args) {
-            String message = args[0].toString();
+            String message = args[0].toString().trim();
+            final formatHint =
+                args.length > 1 ? args[1]?.toString() : null;
+            final format = formatHint == 'hls'
+                ? VideoSourceFormat.hls
+                : VideoSourceFormat.auto;
             logEventController.add('Callback received: $message');
-            if (message.contains('http') &&
+            if ((message.contains('http') || message.startsWith('//')) &&
                 !isVideoSourceLoaded &&
                 !_isAdUrl(message.toLowerCase())) {
-              _handleVideoResolved(message, 'JSBridge video source');
+              _handleVideoResolved(
+                message,
+                'JSBridge video source',
+                format: format,
+              );
             }
           });
     }
@@ -187,6 +226,66 @@ class VideoWebviewAndroidImpl
 
   Future<void> addUserScripts(bool useLegacyParser) async {
     final List<UserScript> scripts = [];
+
+    // Older Android TV WebViews (e.g. Chromium 113) lack AbortSignal.any /
+    // Promise.withResolvers used by modern Next.js/Supabase player pages.
+    const String webCompatScript = """
+      (function() {
+        if (typeof AbortSignal !== 'undefined') {
+          if (typeof AbortSignal.any !== 'function') {
+            AbortSignal.any = function(signals) {
+              var controller = new AbortController();
+              if (!signals) return controller.signal;
+              var list = Array.from(signals);
+              for (var i = 0; i < list.length; i++) {
+                var sig = list[i];
+                if (!sig) continue;
+                if (sig.aborted) {
+                  try { controller.abort(sig.reason); } catch (_) { controller.abort(); }
+                  return controller.signal;
+                }
+                (function(s) {
+                  s.addEventListener('abort', function() {
+                    if (!controller.signal.aborted) {
+                      try { controller.abort(s.reason); } catch (_) { controller.abort(); }
+                    }
+                  }, { once: true });
+                })(sig);
+              }
+              return controller.signal;
+            };
+          }
+          if (typeof AbortSignal.timeout !== 'function') {
+            AbortSignal.timeout = function(ms) {
+              var controller = new AbortController();
+              setTimeout(function() {
+                try {
+                  controller.abort(new DOMException('Signal timed out.', 'TimeoutError'));
+                } catch (_) {
+                  controller.abort();
+                }
+              }, ms);
+              return controller.signal;
+            };
+          }
+        }
+        if (typeof Promise !== 'undefined' && typeof Promise.withResolvers !== 'function') {
+          Promise.withResolvers = function() {
+            var resolve, reject;
+            var promise = new Promise(function(res, rej) {
+              resolve = res;
+              reject = rej;
+            });
+            return { promise: promise, resolve: resolve, reject: reject };
+          };
+        }
+      })();
+    """;
+    scripts.add(UserScript(
+      source: webCompatScript,
+      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      forMainFrameOnly: false,
+    ));
 
     if (useLegacyParser) {
       logEventController.add('Adding JSBridgeDebug UserScript');
@@ -235,7 +334,7 @@ class VideoWebviewAndroidImpl
         function _isStreamUrl(u) {
           if (!u || typeof u !== 'string') return false;
           const low = u.toLowerCase();
-          if (low.includes('googleads') || low.includes('adtrafficquality') || low.includes('prestrain.html')) return false;
+          if (low.includes('googleads') || low.includes('adtrafficquality') || low.includes('prestrain.html') || low.includes('adposter')) return false;
           return low.includes('.m3u8') || low.includes('.mp4');
         }
 
@@ -262,7 +361,7 @@ class VideoWebviewAndroidImpl
               resolve(text);
               if (typeof text === 'string' && text.trim().startsWith("#EXTM3U")) {
                 window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found in response: ' + this.url);
-                window.flutter_inappwebview.callHandler('VideoBridgeDebug', this.url);
+                window.flutter_inappwebview.callHandler('VideoBridgeDebug', this.url, 'hls');
               }
             }).catch(reject);
           });
@@ -285,7 +384,7 @@ class VideoWebviewAndroidImpl
                 let content = this.responseText;
                 if (content && content.trim().startsWith("#EXTM3U")) {
                   window.flutter_inappwebview.callHandler('LogBridge', 'M3U8 source found in XHR: ' + args[1]);
-                  window.flutter_inappwebview.callHandler('VideoBridgeDebug', args[1]);
+                  window.flutter_inappwebview.callHandler('VideoBridgeDebug', args[1], 'hls');
                 }
               }
             } catch(e) {}
@@ -297,13 +396,30 @@ class VideoWebviewAndroidImpl
       const String videoTagParserScript = """
         window.flutter_inappwebview.callHandler('LogBridge', 'VideoTagParser script loaded: ' + window.location.href);
 
+        function _isDirectMediaUrl(u) {
+          if (!u || typeof u !== 'string') return false;
+          var s = u.trim();
+          if (!(s.indexOf('http') === 0 || s.indexOf('//') === 0)) return false;
+          var clean = s.split('#')[0].split('?')[0].toLowerCase();
+          if (clean.endsWith('.html') || clean.endsWith('.htm')) return false;
+          return clean.endsWith('.m3u8') ||
+                 clean.endsWith('.mp4') ||
+                 clean.endsWith('.flv') ||
+                 clean.endsWith('.mkv') ||
+                 clean.endsWith('.webm') ||
+                 clean.endsWith('.mknvideo') ||
+                 clean.endsWith('.ts') ||
+                 s.toLowerCase().indexOf('.m3u8') !== -1;
+        }
+
         function _findStreamInScripts() {
           try {
-            // MacCMS 播放页把真实地址放在 player_aaaa.url（可能经过 escape/base64）
+            // MacCMS 播放页把真实地址放在 player_aaaa.url（可能经过 escape/base64），
+            // 但部分站点会填中间网页地址（如 quan.qq.com、xifanacg、bilibili），仅直链媒体才提前返回。
             var _pa = window.player_aaaa; var _pu = _pa && _pa.url ? String(_pa.url) : '';
             if (_pu && _pa.encrypt == 1) { try { _pu = unescape(_pu); } catch(e) {} }
             if (_pu && _pa.encrypt == 2) { try { _pu = unescape(atob(_pu)); } catch(e) {} }
-            if (_pu.indexOf('http') === 0 || _pu.indexOf('//') === 0) {
+            if (_isDirectMediaUrl(_pu)) {
               return _pu;
             }
             // Check global player objects
@@ -316,19 +432,24 @@ class VideoWebviewAndroidImpl
             if (window.player && window.player.url) {
               return window.player.url;
             }
-            if (window.MacPlayer && window.MacPlayer.PlayUrl) {
+            if (window.MacPlayer && window.MacPlayer.PlayUrl &&
+                _isDirectMediaUrl(String(window.MacPlayer.PlayUrl))) {
               return window.MacPlayer.PlayUrl;
             }
 
             // Check inline script tags
             const scripts = document.getElementsByTagName('script');
-            const m3u8Regex = /https?:\\/\\/[^'\"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'\"<>\\s\\\\]*/i;
+            const m3u8Regex = /https?:\\/\\/[^'"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'"<>\\s\\\\]*/gi;
             for (let i = 0; i < scripts.length; i++) {
               const text = scripts[i].textContent || scripts[i].innerText;
-              if (text && !text.includes('googleads') && !text.includes('prestrain.html')) {
-                const match = text.match(m3u8Regex);
-                if (match && match[0]) {
-                  return match[0];
+              if (text) {
+                const matches = text.match(m3u8Regex) || [];
+                for (let j = 0; j < matches.length; j++) {
+                  const candidate = matches[j];
+                  const low = candidate.toLowerCase();
+                  if (!low.includes('googleads') && !low.includes('prestrain.html') && !low.includes('adposter') && !low.includes('baidu.com')) {
+                    return candidate;
+                  }
                 }
               }
             }
@@ -352,7 +473,7 @@ class VideoWebviewAndroidImpl
 
         function processVideoElement(video) {
           let src = video.getAttribute('src') || video.currentSrc || video.src;
-          if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
+          if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads') && !src.toLowerCase().includes('adposter')) {
             window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found: ' + src);
             window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
             return true;
@@ -360,7 +481,7 @@ class VideoWebviewAndroidImpl
           const sources = video.getElementsByTagName('source');
           for (let source of sources) {
             src = source.getAttribute('src');
-            if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
+            if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads') && !src.toLowerCase().includes('adposter')) {
               window.flutter_inappwebview.callHandler('LogBridge', 'VIDEO source found (source tag): ' + src);
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
               return true;
@@ -411,6 +532,16 @@ class VideoWebviewAndroidImpl
               attributes: true,
               attributeFilter: ['src']
             });
+          }
+          if (window !== window.top) {
+            var _iframePollCount = 0;
+            var _iframePoller = setInterval(function() {
+              if (++_iframePollCount > 15) {
+                clearInterval(_iframePoller);
+                return;
+              }
+              runFullDetection();
+            }, 1000);
           }
         }
 
@@ -468,10 +599,25 @@ class VideoWebviewAndroidImpl
       await webviewController?.evaluateJavascript(source: """
         (function() {
           try {
+            function _isDirectMediaUrl(u) {
+              if (!u || typeof u !== 'string') return false;
+              var s = u.trim();
+              if (!(s.indexOf('http') === 0 || s.indexOf('//') === 0)) return false;
+              var clean = s.split('#')[0].split('?')[0].toLowerCase();
+              if (clean.endsWith('.html') || clean.endsWith('.htm')) return false;
+              return clean.endsWith('.m3u8') ||
+                     clean.endsWith('.mp4') ||
+                     clean.endsWith('.flv') ||
+                     clean.endsWith('.mkv') ||
+                     clean.endsWith('.webm') ||
+                     clean.endsWith('.mknvideo') ||
+                     clean.endsWith('.ts') ||
+                     s.toLowerCase().indexOf('.m3u8') !== -1;
+            }
             var _pa = window.player_aaaa; var _pu = _pa && _pa.url ? String(_pa.url) : '';
             if (_pu && _pa.encrypt == 1) { try { _pu = unescape(_pu); } catch(e) {} }
             if (_pu && _pa.encrypt == 2) { try { _pu = unescape(atob(_pu)); } catch(e) {} }
-            if (_pu.indexOf('http') === 0 || _pu.indexOf('//') === 0) {
+            if (_isDirectMediaUrl(_pu)) {
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', _pu);
               return;
             }
@@ -487,20 +633,25 @@ class VideoWebviewAndroidImpl
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.player.url);
               return;
             }
-            if (window.MacPlayer && window.MacPlayer.PlayUrl) {
+            if (window.MacPlayer && window.MacPlayer.PlayUrl &&
+                _isDirectMediaUrl(String(window.MacPlayer.PlayUrl))) {
               window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl);
               return;
             }
 
             var scripts = document.getElementsByTagName('script');
-            var m3u8Regex = /https?:\\/\\/[^'\"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'\"<>\\s\\\\]*/i;
+            var m3u8Regex = /https?:\\/\\/[^'"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'"<>\\s\\\\]*/gi;
             for (var i = 0; i < scripts.length; i++) {
               var text = scripts[i].textContent || scripts[i].innerText;
-              if (text && !text.includes('googleads') && !text.includes('prestrain.html')) {
-                var match = text.match(m3u8Regex);
-                if (match && match[0]) {
-                  window.flutter_inappwebview.callHandler('VideoBridgeDebug', match[0]);
-                  return;
+              if (text) {
+                var matches = text.match(m3u8Regex) || [];
+                for (var m = 0; m < matches.length; m++) {
+                  var cand = matches[m];
+                  var candLow = cand.toLowerCase();
+                  if (!candLow.includes('googleads') && !candLow.includes('prestrain.html') && !candLow.includes('adposter') && !candLow.includes('baidu.com')) {
+                    window.flutter_inappwebview.callHandler('VideoBridgeDebug', cand);
+                    return;
+                  }
                 }
               }
             }
@@ -508,14 +659,14 @@ class VideoWebviewAndroidImpl
             var videos = document.querySelectorAll('video');
             for (var j = 0; j < videos.length; j++) {
               var src = videos[j].getAttribute('src') || videos[j].currentSrc || videos[j].src;
-              if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
+              if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads') && !src.toLowerCase().includes('adposter')) {
                 window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
                 return;
               }
               var sources = videos[j].getElementsByTagName('source');
               for (var k = 0; k < sources.length; k++) {
                 var s = sources[k].getAttribute('src');
-                if (s && s.trim() !== '' && !s.startsWith('blob:') && !s.includes('googleads')) {
+                if (s && s.trim() !== '' && !src.startsWith('blob:') && !s.includes('googleads') && !s.toLowerCase().includes('adposter')) {
                   window.flutter_inappwebview.callHandler('VideoBridgeDebug', s);
                   return;
                 }
@@ -597,6 +748,7 @@ class VideoWebviewAndroidImpl
         lower.contains('googlesyndication') ||
         lower.contains('adtrafficquality') ||
         lower.contains('doubleclick') ||
+        lower.contains('adposter') ||
         lower.contains('/adv/') ||
         lower.contains('/ads/') ||
         lower.contains('prestrain.html') ||

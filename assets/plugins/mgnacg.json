@@ -2,7 +2,7 @@
   "api": "9",
   "type": "anime",
   "name": "mgnacg",
-  "version": "1.2",
+  "version": "1.3",
   "muliSources": true,
   "useWebview": true,
   "useNativePlayer": true,
@@ -10,7 +10,7 @@
   "useLegacyParser": false,
   "adBlocker": false,
   "userAgent": "",
-  "baseURL": "https://www.mgnacg.com/media/",
+  "baseURL": "https://www.mgnacg.com/",
   "searchURL": "",
   "searchMode": "api",
   "chapterMode": "xpath",
@@ -25,12 +25,13 @@
     },
     "listPath": "$.list[*]",
     "namePath": "$.name",
-    "sourcePath": "$.id"
+    "sourcePath": "$.id",
+    "sourceTemplate": "https://www.mgnacg.com/media/@source"
   },
   "searchList": "",
   "searchName": "",
   "searchResult": "",
   "chapterRoads": "//ul[@class='anthology-list-play size']",
-  "chapterResult": ".//li/a",
+  "chapterResult": ".//li/a[not(contains(@href, '-1-'))]",
   "referer": ""
 }

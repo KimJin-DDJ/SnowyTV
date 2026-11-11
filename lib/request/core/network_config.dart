@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dio/io.dart';
+import 'package:kazumi/request/core/plugin_network_support.dart';
 import 'package:kazumi/services/logging/logger.dart';
 import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/network/system_proxy_service.dart';
@@ -41,14 +42,15 @@ class NetworkConfig {
   IOHttpClientAdapter createAdapter() {
     return IOHttpClientAdapter(
       createHttpClient: () {
-        final client = HttpClient();
+        final enableDohFallback = !hasProxy && !Platform.isWindows;
+        final client = PluginNetworkSupport.createHttpClient(
+          enableDohFallback: enableDohFallback,
+          allowBadCertificates: allowBadCertificates,
+        );
         if (hasProxy) {
           client.findProxy = (_) => 'PROXY $proxyHost:$proxyPort';
         } else if (Platform.isWindows) {
           client.findProxy = SystemProxyService.findProxy;
-        }
-        if (allowBadCertificates) {
-          client.badCertificateCallback = (cert, host, port) => true;
         }
         return client;
       },

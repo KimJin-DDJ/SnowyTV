@@ -187,7 +187,10 @@ class VideoWebviewAppleImpl
       webviewController?.addJavaScriptHandler(
           handlerName: 'VideoBridgeDebug',
           callback: (args) {
-            String message = args[0].toString();
+            String message = args[0].toString().trim();
+            if (message.startsWith('//')) {
+              message = 'https:$message';
+            }
             logEventController.add('Callback received: $message');
             if (message.contains('http') && !isVideoSourceLoaded) {
               logEventController.add('Loading video source: $message');

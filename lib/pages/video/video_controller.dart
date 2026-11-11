@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/modules/roads/road_module.dart';
 import 'package:kazumi/pages/video/video_playback_args.dart';
+import 'package:kazumi/pages/video/playback_startup_timing.dart';
 import 'package:kazumi/plugins/plugins.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
@@ -11,9 +12,11 @@ import 'package:kazumi/modules/history/history_module.dart';
 import 'package:kazumi/repositories/download_repository.dart';
 import 'package:kazumi/services/download/download_manager.dart';
 import 'package:kazumi/services/platform/platform_environment_service.dart';
+import 'package:kazumi/services/video_source/hls_sanitizing_proxy.dart';
 import 'package:kazumi/services/video_source/mxdm_tv_source_probe.dart';
 import 'package:kazumi/services/video_source/mxdm_tv_source_selection.dart';
 import 'package:kazumi/services/video_source/services.dart';
+import 'package:kazumi/services/video_source/video_source_format.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:mobx/mobx.dart';
 import 'package:kazumi/services/logging/logger.dart';
@@ -149,6 +152,7 @@ abstract class _VideoPageController with Store implements Disposable {
 
   WebViewVideoSourceService? _videoSourceService;
   MxdmTvSourceProbe? _mxdmSourceProbe;
+  PlaybackStartupTiming? _startupTiming;
 
   final StreamController<String> _logStreamController =
       StreamController<String>.broadcast();
@@ -443,6 +447,8 @@ abstract class _VideoPageController with Store implements Disposable {
     required PlayerController playerController,
     bool isRoadFallback = false,
   }) async {
+    _startupTiming?.dispose();
+    _startupTiming = null;
     episode = _clampEpisodeToRoad(episode, currentRoad);
     if (!isRoadFallback) _failedRoads.clear();
     final session = _playbackSessions.begin();
@@ -642,6 +648,10 @@ abstract class _VideoPageController with Store implements Disposable {
     required AsyncSession session,
     required PlayerController playerController,
   }) async {
+    final startupTiming = PlaybackStartupTiming(
+      onEvent: (message) => KazumiLogger().i('VideoPageController: $message'),
+    );
+    _startupTiming = startupTiming;
     final resolver = _videoSourceService ??= WebViewVideoSourceService();
 
     await _logSubscription?.cancel();
@@ -724,14 +734,17 @@ abstract class _VideoPageController with Store implements Disposable {
         source = await resolve(preferredEpisode, const Duration(seconds: 15));
       }
       if (session.isStale) return;
+      startupTiming.addressReady(source.format.name);
       _finishLoading();
-      KazumiLogger()
-          .i('VideoPageController: resolved video URL: ${source.url}');
+
+      final playbackUrl = await HlsSanitizingProxy.instance
+          .preparePlaybackUrlIfNeeded(source, headers);
+      if (session.isStale) return;
 
       PlaybackInitParams buildParams(
-              Map<String, String> httpHeaders, String referer) =>
+              String url, Map<String, String> httpHeaders, String referer) =>
           PlaybackInitParams(
-        videoUrl: source.url,
+        videoUrl: url,
         offset: source.offset,
         isLocalPlayback: false,
         videoSourceFormat: source.format,
@@ -753,20 +766,92 @@ abstract class _VideoPageController with Store implements Disposable {
             : bangumiItem.name,
       );
 
-      final params = buildParams(headers, effectiveReferer);
-      // Some CDNs (e.g. Douyin's 365yg.com behind 7sefun) reject any request
-      // carrying a Referer with HTTP 403. Retry the same URL once without it
-      // before giving up on this line.
+      final params = buildParams(playbackUrl, headers, effectiveReferer);
+      // Some CDNs (e.g. Douyin's 365yg.com behind 7sefun/LMM) reject any
+      // request carrying a Referer with HTTP 403. Also, some CDNs disguise
+      // MPEG-TS segments inside .m3u8 playlists with fake image headers; probe
+      // via HlsSanitizingProxy on demux format errors before giving up on this line.
       var retriedWithoutReferer = !headers.containsKey('referer');
+      var retriedWithHlsProxy = playbackUrl != source.url;
+      var activePlaybackUrl = playbackUrl;
+      var activeHeaders = headers;
+      var activeReferer = effectiveReferer;
+      playerController.playback.onPlayerOpenStarted = () {
+        if (session.isActive) startupTiming.playerOpenStarted();
+      };
+      playerController.playback.onVideoOutputReady = (elapsed) {
+        if (session.isActive) {
+          startupTiming.videoOutputReady(openDuration: elapsed);
+        }
+      };
+      playerController.playback.onHlsStartup403 = (_) {
+        if (session.isStale) return;
+        KazumiLogger().w(
+            'VideoPageController: HLS startup returned repeated HTTP 403; switching road');
+        unawaited(_fallbackToNextRoad(
+          resolvedEpisode,
+          session: session,
+          offset: offset,
+          playerController: playerController,
+          reason: 'HLS 启动期间连续收到 HTTP 403',
+        ));
+      };
       playerController.playback.onFatalOpenError = (error) {
         if (session.isStale) return;
+        if (!retriedWithHlsProxy &&
+            error.contains('Failed to recognize file format') &&
+            (source.format == VideoSourceFormat.hls ||
+                source.url.toLowerCase().contains('.m3u8'))) {
+          retriedWithHlsProxy = true;
+          unawaited(() async {
+            final proxiedUrl = await HlsSanitizingProxy.instance
+                .preparePlaybackUrlIfNeeded(
+                  source,
+                  activeHeaders,
+                  forceProbe: true,
+                );
+            if (session.isStale) return;
+            if (proxiedUrl != activePlaybackUrl) {
+              activePlaybackUrl = proxiedUrl;
+              final ok = await playerController.init(
+                  buildParams(proxiedUrl, activeHeaders, activeReferer));
+              if (session.isStale) return;
+              if (ok) {
+                playingEpisode = VideoEpisodeSelection(
+                  episode: resolvedEpisode.listIndex,
+                  road: resolvedEpisode.roadIndex,
+                );
+              }
+              return;
+            }
+            await _fallbackToNextRoad(
+              resolvedEpisode,
+              session: session,
+              offset: offset,
+              playerController: playerController,
+              reason: '视频地址无法打开',
+            );
+          }());
+          return;
+        }
         if (!retriedWithoutReferer) {
           retriedWithoutReferer = true;
           KazumiLogger().i('VideoPageController: open failed with referer, '
-              'retrying without referer: ${source.url}');
+              'retrying without referer');
           final noReferer = Map<String, String>.of(headers)..remove('referer');
+          activeHeaders = noReferer;
+          activeReferer = '';
           unawaited(() async {
-            final ok = await playerController.init(buildParams(noReferer, ''));
+            final retryUrl = await HlsSanitizingProxy.instance
+                .preparePlaybackUrlIfNeeded(
+                  source,
+                  noReferer,
+                  forceProbe: retriedWithHlsProxy,
+                );
+            if (session.isStale) return;
+            activePlaybackUrl = retryUrl;
+            final ok = await playerController.init(
+                buildParams(retryUrl, noReferer, ''));
             if (session.isStale) return;
             if (ok) {
               playingEpisode = VideoEpisodeSelection(
@@ -779,6 +864,7 @@ abstract class _VideoPageController with Store implements Disposable {
         }
         unawaited(_fallbackToNextRoad(
           resolvedEpisode,
+          session: session,
           offset: offset,
           playerController: playerController,
           reason: '视频地址无法打开',
@@ -800,6 +886,7 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       await _fallbackToNextRoad(
         preferredEpisode,
+        session: session,
         offset: offset,
         playerController: playerController,
         reason: '视频解析超时',
@@ -812,6 +899,7 @@ abstract class _VideoPageController with Store implements Disposable {
       }
       await _fallbackToNextRoad(
         preferredEpisode,
+        session: session,
         offset: offset,
         playerController: playerController,
         reason: '视频解析失败：${e.toString()}',
@@ -822,11 +910,12 @@ abstract class _VideoPageController with Store implements Disposable {
   /// 当前线路无法播放时，自动切到其它线路的同一集；全部失败才显示错误。
   Future<void> _fallbackToNextRoad(
     EpisodeRef failed, {
+    required AsyncSession session,
     required int offset,
     required PlayerController playerController,
     required String reason,
   }) async {
-    _failedRoads.add(failed.roadIndex);
+    if (session.isStale || !_failedRoads.add(failed.roadIndex)) return;
     KazumiLogger().w('VideoPageController: road ${failed.roadIndex + 1} '
         'failed for ${failed.displayTitle}: $reason');
     for (var road = 0; road < roadList.length; road++) {
@@ -849,6 +938,7 @@ abstract class _VideoPageController with Store implements Disposable {
       return;
     }
     await playerController.stop();
+    if (session.isStale) return;
     _failLoading(roadList.length > 1
         ? '$reason\n所有线路都无法播放，请在「播放来源」里换一个来源'
         : '$reason\n这个来源只有一条线路且无法播放，请在「播放来源」里换一个来源');
@@ -949,6 +1039,8 @@ abstract class _VideoPageController with Store implements Disposable {
   @override
   void dispose() {
     unawaited(fullscreen.close());
+    _startupTiming?.dispose();
+    _startupTiming = null;
     _playbackSessions.cancel();
     _mxdmSourceProbe?.close();
     _mxdmSourceProbe = null;

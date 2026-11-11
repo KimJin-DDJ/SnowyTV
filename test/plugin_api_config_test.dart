@@ -50,6 +50,7 @@ void main() {
         'listPath': r'$.data[*]',
         'namePath': r'$.name',
         'sourcePath': r'$.id',
+        'sourceTemplate': 'https://example.com/detail/@source.html',
       },
       'chapterApiConfig': {
         'request': {
@@ -69,6 +70,10 @@ void main() {
     expect(restored.searchMode, RuleMode.api);
     expect(restored.chapterMode, RuleMode.api);
     expect(restored.searchApiConfig.request.query['q'], '@keyword');
+    expect(
+      restored.searchApiConfig.sourceTemplate,
+      'https://example.com/detail/@source.html',
+    );
     expect(
       restored.chapterApiConfig.request.url,
       'https://example.com/videos/@source',

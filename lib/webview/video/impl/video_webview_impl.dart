@@ -139,7 +139,10 @@ class VideoWebviewImpl
       webviewController?.addJavaScriptHandler(
           handlerName: 'VideoBridgeDebug',
           callback: (args) {
-            String message = args[0].toString();
+            String message = args[0].toString().trim();
+            if (message.startsWith('//')) {
+              message = 'https:$message';
+            }
             logEventController.add('Callback received: $message');
             if (message.contains('http') && !isVideoSourceLoaded) {
               logEventController.add('Loading video source: $message');
@@ -413,19 +416,32 @@ class VideoWebviewImpl
               return;
             }
             if (window.MacPlayer && window.MacPlayer.PlayUrl) {
-              window.flutter_inappwebview.callHandler('VideoBridgeDebug', window.MacPlayer.PlayUrl);
-              return;
+              var _mpu = String(window.MacPlayer.PlayUrl).trim();
+              var _mclean = _mpu.split('#')[0].split('?')[0].toLowerCase();
+              if (!_mclean.endsWith('.html') && !_mclean.endsWith('.htm') &&
+                  (_mclean.endsWith('.m3u8') || _mclean.endsWith('.mp4') ||
+                   _mclean.endsWith('.flv') || _mclean.endsWith('.mkv') ||
+                   _mclean.endsWith('.webm') || _mclean.endsWith('.mknvideo') ||
+                   _mclean.endsWith('.ts') ||
+                   _mpu.toLowerCase().indexOf('.m3u8') !== -1)) {
+                window.flutter_inappwebview.callHandler('VideoBridgeDebug', _mpu);
+                return;
+              }
             }
 
             var scripts = document.getElementsByTagName('script');
-            var m3u8Regex = /https?:\\/\\/[^'\"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'\"<>\\s\\\\]*/i;
+            var m3u8Regex = /https?:\\/\\/[^'"<>\\s\\\\]+?\\.(?:m3u8|mp4)[^'"<>\\s\\\\]*/gi;
             for (var i = 0; i < scripts.length; i++) {
               var text = scripts[i].textContent || scripts[i].innerText;
-              if (text && !text.includes('googleads') && !text.includes('prestrain.html')) {
-                var match = text.match(m3u8Regex);
-                if (match && match[0]) {
-                  window.flutter_inappwebview.callHandler('VideoBridgeDebug', match[0]);
-                  return;
+              if (text) {
+                var matches = text.match(m3u8Regex) || [];
+                for (var m = 0; m < matches.length; m++) {
+                  var cand = matches[m];
+                  var candLow = cand.toLowerCase();
+                  if (!candLow.includes('googleads') && !candLow.includes('prestrain.html') && !candLow.includes('adposter') && !candLow.includes('baidu.com')) {
+                    window.flutter_inappwebview.callHandler('VideoBridgeDebug', cand);
+                    return;
+                  }
                 }
               }
             }
@@ -433,14 +449,14 @@ class VideoWebviewImpl
             var videos = document.querySelectorAll('video');
             for (var j = 0; j < videos.length; j++) {
               var src = videos[j].getAttribute('src') || videos[j].currentSrc || videos[j].src;
-              if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads')) {
+              if (src && src.trim() !== '' && !src.startsWith('blob:') && !src.includes('googleads') && !src.toLowerCase().includes('adposter')) {
                 window.flutter_inappwebview.callHandler('VideoBridgeDebug', src);
                 return;
               }
               var sources = videos[j].getElementsByTagName('source');
               for (var k = 0; k < sources.length; k++) {
                 var s = sources[k].getAttribute('src');
-                if (s && s.trim() !== '' && !s.startsWith('blob:') && !s.includes('googleads')) {
+                if (s && s.trim() !== '' && !s.startsWith('blob:') && !s.includes('googleads') && !s.toLowerCase().includes('adposter')) {
                   window.flutter_inappwebview.callHandler('VideoBridgeDebug', s);
                   return;
                 }
@@ -522,6 +538,7 @@ class VideoWebviewImpl
         lower.contains('googlesyndication') ||
         lower.contains('adtrafficquality') ||
         lower.contains('doubleclick') ||
+        lower.contains('adposter') ||
         lower.contains('/adv/') ||
         lower.contains('/ads/') ||
         lower.contains('prestrain.html') ||

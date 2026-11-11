@@ -2,8 +2,8 @@
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-version=2.3.8-snowy.8
-build_number=203133
+version=2.3.8-snowy.9
+build_number=203134
 case "${1:-}" in
   '') target=android-arm; abi=armeabi-v7a ;;
   --local) target=android-arm64; abi=arm64-v8a ;;

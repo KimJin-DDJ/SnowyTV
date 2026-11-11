@@ -1,5 +1,6 @@
 // ignore_for_file: library_private_types_in_public_api
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -14,6 +15,7 @@ import 'package:kazumi/services/network/proxy_utils.dart';
 import 'package:kazumi/services/network/system_proxy_service.dart';
 import 'package:kazumi/services/player/playback_cache_policy.dart';
 import 'package:kazumi/services/player/player_error_mapper.dart';
+import 'package:kazumi/services/player/startup_hls_403_guard.dart';
 import 'package:kazumi/services/storage/storage.dart';
 import 'package:kazumi/services/video_source/video_source_format.dart';
 import 'package:kazumi/utils/async_serial_queue.dart';
@@ -92,6 +94,19 @@ abstract class _PlayerPlaybackController with Store {
 
   /// 打开视频流失败（地址失效、403、格式无法识别）时回调，用于自动切换线路。
   void Function(String error)? onFatalOpenError;
+
+  /// 开播前连续 HLS 403 的专用回调，允许跳过通用重试并直接换线路。
+  void Function(String error)? onHlsStartup403;
+
+  /// 播放器即将调用 `open` 时通知，用于统计开播到首帧耗时。
+  void Function()? onPlayerOpenStarted;
+
+  /// Renderer 就绪且播放位置前进后通知，提供单调时钟计算的耗时。
+  /// Android 上这是首帧显示的估算信号，不代表已确认物理屏幕呈现。
+  void Function(Duration elapsed)? onVideoOutputReady;
+
+  StreamSubscription<PlayerLog>? _startupLogSubscription;
+  StreamSubscription<Duration>? _startupPositionSubscription;
 
   /// 当前超分辨率模式
   @observable
@@ -286,6 +301,9 @@ abstract class _PlayerPlaybackController with Store {
     hardwareDecoder = GStorage.getSetting(SettingsKeys.hardwareDecoder);
     autoPlay = GStorage.getSetting(SettingsKeys.autoPlay);
     playerDebugMode = GStorage.getSetting(SettingsKeys.playerDebugMode);
+    final isHlsSource =
+        videoSourceFormat == VideoSourceFormat.hls ||
+        videoUrl().toLowerCase().contains('.m3u8');
 
     if (!canInstall()) {
       return null;
@@ -295,7 +313,13 @@ abstract class _PlayerPlaybackController with Store {
         configuration: PlayerConfiguration(
           bufferSize: cachePolicy.bufferSize,
           osc: false,
-          logLevel: MPVLogLevel.values[debug.playerLogLevel],
+          // HLS 403 detection relies on FFmpeg warning/error logs. Keep those
+          // available even when the debug page is set to errors only.
+          logLevel:
+              MPVLogLevel.values[isHlsSource &&
+                      debug.playerLogLevel < MPVLogLevel.warn.index
+                  ? MPVLogLevel.warn.index
+                  : debug.playerLogLevel],
           adBlocker: adBlockerEnabled,
         ),
       ),
@@ -318,6 +342,34 @@ abstract class _PlayerPlaybackController with Store {
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
       }
+
+      await _startupLogSubscription?.cancel();
+      await _startupPositionSubscription?.cancel();
+      final startup403Guard = StartupHls403Guard();
+      var openStopwatch = Stopwatch();
+      var openFailureReported = false;
+      void reportOpenFailure(String error, {required bool startup403}) {
+        if (!isCurrentPlayer(player) || openFailureReported) return;
+        openFailureReported = true;
+        if (startup403) {
+          onHlsStartup403?.call(error);
+        } else {
+          onFatalOpenError?.call(error);
+        }
+      }
+
+      _startupLogSubscription = player.stream.log.listen((event) {
+        if (!isHlsSource ||
+            !openStopwatch.isRunning ||
+            !isCurrentPlayer(player)) {
+          return;
+        }
+        if (startup403Guard.addLog(event.text, openStopwatch.elapsed)) {
+          const error = '连续收到 HTTP 403，HLS 开播前多个分片均无法打开';
+          KazumiLogger().w('PlayerController: $error');
+          reportOpenFailure(error, startup403: true);
+        }
+      });
 
       var pp = player.platform as NativePlayer;
       // 在非 TV 端启用硬盘作为双重缓存；在 Android TV 上禁用，保护电视闪存寿命并避免慢速 eMMC 导致的 I/O 阻塞掉帧
@@ -484,6 +536,36 @@ abstract class _PlayerPlaybackController with Store {
           androidAttachSurfaceAfterVideoParameters: false,
         ),
       );
+      final currentVideoController = videoController!;
+      var rendererReady = false;
+      var playbackAdvanced = false;
+      var firstFrameReported = false;
+      void reportFirstFrameIfReady() {
+        if (firstFrameReported ||
+            !rendererReady ||
+            (autoPlay && !playbackAdvanced) ||
+            !isCurrentPlayer(player)) {
+          return;
+        }
+        firstFrameReported = true;
+        startup403Guard.markVideoStarted();
+        onVideoOutputReady?.call(openStopwatch.elapsed);
+      }
+
+      unawaited(
+        currentVideoController.waitUntilFirstFrameRendered
+            .then((_) {
+              rendererReady = true;
+              reportFirstFrameIfReady();
+            })
+            .catchError((Object _) {}),
+      );
+      _startupPositionSubscription = player.stream.position.listen((position) {
+        if (position > Duration(seconds: offset)) {
+          playbackAdvanced = true;
+          reportFirstFrameIfReady();
+        }
+      });
       player.setPlaylistMode(PlaylistMode.none);
       if (!isCurrentPlayer(player)) {
         return await _discardIfNotCurrent(candidate);
@@ -501,20 +583,22 @@ abstract class _PlayerPlaybackController with Store {
                 message: actionableMessage, showActionButton: true);
           } else if (showPlayerError) {
             KazumiDialog.showToast(
-                message: '播放器内部错误 ${event.toString()} ${videoUrl()}',
-                duration: const Duration(seconds: 5),
-                showActionButton: true);
+              message: '播放器内部错误 ${event.toString()}',
+              duration: const Duration(seconds: 5),
+              showActionButton: true,
+            );
           }
         }
-        KazumiLogger().e('PlayerController: Player intent error ${videoUrl()}',
-            error: event);        final text = event.toString();
-        final isOpenFailure = text.contains('Failed to open') ||
+        KazumiLogger().e('PlayerController: Player intent error', error: event);
+        final text = event.toString();
+        final isOpenFailure =
+            text.contains('Failed to open') ||
             text.contains('Failed to recognize file format') ||
             text.contains('loading failed');
         if (isCurrentPlayer(player) &&
             isOpenFailure &&
             duration == Duration.zero) {
-          onFatalOpenError?.call(text);
+          reportOpenFailure(text, startup403: false);
         }
       });
 
@@ -532,6 +616,8 @@ abstract class _PlayerPlaybackController with Store {
         }
       }
 
+      openStopwatch = Stopwatch()..start();
+      onPlayerOpenStarted?.call();
       await player.open(
         Media(videoUrl(),
             start: Duration(seconds: offset), httpHeaders: httpHeaders),
@@ -552,6 +638,10 @@ abstract class _PlayerPlaybackController with Store {
         _ownedPlayer = null;
         videoController = null;
       }
+      await _startupLogSubscription?.cancel();
+      await _startupPositionSubscription?.cancel();
+      _startupLogSubscription = null;
+      _startupPositionSubscription = null;
       await candidate.dispose();
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -702,7 +792,11 @@ abstract class _PlayerPlaybackController with Store {
     await Future.wait([
       ownedPlayer?.dispose() ?? Future<void>.value(),
       _cancelDebugInfo(),
+      _startupLogSubscription?.cancel() ?? Future<void>.value(),
+      _startupPositionSubscription?.cancel() ?? Future<void>.value(),
     ]);
+    _startupLogSubscription = null;
+    _startupPositionSubscription = null;
   }
 
   Future<Uint8List?> screenshotPng() async {

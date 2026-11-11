@@ -131,6 +131,9 @@ abstract class _PluginsController with Store {
         final jsonString = await pluginsFile.readAsString();
         pluginList.addAll(_getPluginListFromJson(jsonString));
         KazumiLogger().i('Plugin: Current Plugin number: ${pluginList.length}');
+        if (pluginList.isNotEmpty) {
+          await _syncBundledPlugins();
+        }
       } else {
         // No plugins.json
         var jsonFiles = await _getPluginFiles();
@@ -178,6 +181,62 @@ abstract class _PluginsController with Store {
     await _savePlugins();
     KazumiLogger().i(
         'Plugin: ${jsonFiles.length} plugin files copied to ${newPluginDirectory!.path}');
+  }
+
+  Future<void> _syncBundledPlugins() async {
+    try {
+      final assetManifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final jsonFiles = assetManifest.listAssets().where((String asset) =>
+          asset.startsWith('assets/plugins/') && asset.endsWith('.json'));
+      var updated = 0;
+      var added = 0;
+      var removed = 0;
+      // Remove legacy aafun rule only if it is the obsolete duplicate pointing
+      // at moonci.com (aafun merged into moonci).
+      final aafunIdx = pluginList.indexWhere(
+        (candidate) =>
+            pluginNameKey(candidate.name) == 'aafun' &&
+            (Uri.tryParse(candidate.baseUrl)?.host.contains('moonci.com') ??
+                false),
+      );
+      if (aafunIdx >= 0) {
+        pluginList.removeAt(aafunIdx);
+        removed++;
+      }
+      for (final filePath in jsonFiles) {
+        final jsonString = await rootBundle.loadString(filePath);
+        final bundled = Plugin.fromJson(jsonDecode(jsonString));
+        final index = pluginList.indexWhere(
+          (candidate) =>
+              pluginNameKey(candidate.name) == pluginNameKey(bundled.name),
+        );
+        if (index < 0) {
+          pluginList.add(bundled);
+          added++;
+          continue;
+        }
+        final existing = pluginList[index];
+        final newerVersion = _remoteIsNewer(existing.version, bundled.version);
+        final existingApi = int.tryParse(existing.api) ?? 0;
+        final bundledApi = int.tryParse(bundled.api) ?? 0;
+        if (newerVersion || bundledApi > existingApi) {
+          pluginList[index] = bundled;
+          updated++;
+        }
+      }
+      if (added > 0 || updated > 0 || removed > 0) {
+        await _savePlugins();
+        KazumiLogger().i(
+          'Plugin: synced bundled rules (added=$added, updated=$updated, removed=$removed)',
+        );
+      }
+    } catch (error, stackTrace) {
+      KazumiLogger().w(
+        'Plugin: failed to sync bundled rules',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 
   List<dynamic> _pluginListToJson() {

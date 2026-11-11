@@ -21,12 +21,12 @@
 
 **最新版本 Latest release：** <https://github.com/KimJin-DDJ/SnowyTV/releases/latest>
 
-当前版本 `v2.3.8-snowy.8` 提供以下安装包：
+当前版本 `v2.3.8-snowy.9` 提供以下安装包：
 
 | 设备 Device | 架构 ABI | 文件名 File |
 | :--- | :--- | :--- |
-| Chromecast with Google TV (HD) | `armeabi-v7a` (32-bit) | `SnowyTV-v2.3.8-snowy.8-armeabi-v7a.apk` |
-| Chromecast with Google TV (4K) 及多数 Android TV 盒子 | `arm64-v8a` (64-bit) | `SnowyTV-v2.3.8-snowy.8-arm64-v8a.apk` |
+| Chromecast with Google TV (HD) | `armeabi-v7a` (32-bit) | `SnowyTV-v2.3.8-snowy.9-armeabi-v7a.apk` |
+| Chromecast with Google TV (4K) 及多数 Android TV 盒子 | `arm64-v8a` (64-bit) | `SnowyTV-v2.3.8-snowy.9-arm64-v8a.apk` |
 
 不确定设备架构时，Chromecast HD 选择 `armeabi-v7a`。
 
@@ -45,7 +45,7 @@
 2. 安装 Android SDK Platform-Tools，并在终端连接电视：
    ```bash
    adb connect 192.168.1.42:40123   # 换成电视无线调试页面显示的 IP:端口
-   adb install -r SnowyTV-v2.3.8-snowy.8-armeabi-v7a.apk
+   adb install -r SnowyTV-v2.3.8-snowy.9-armeabi-v7a.apk
    ```
 3. 如果仓库中的脚本更方便，也可以在克隆的仓库目录运行 `bash install-tv.sh 192.168.1.42:40123`。脚本会检查设备架构并安装对应版本。
 
@@ -116,8 +116,8 @@ cd SnowyTV
 
 编译产物会生成在仓库根目录：
 
-- `SnowyTV-v2.3.8-snowy.8-armeabi-v7a.apk`
-- `SnowyTV-v2.3.8-snowy.8-arm64-v8a.apk`
+- `SnowyTV-v2.3.8-snowy.9-armeabi-v7a.apk`
+- `SnowyTV-v2.3.8-snowy.9-arm64-v8a.apk`
 
 调试运行可使用 `flutter run`，目标设备选择 Android 模拟器或真机即可。
 

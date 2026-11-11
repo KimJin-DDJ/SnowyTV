@@ -1,7 +1,37 @@
 import 'dart:io';
 
+import 'package:kazumi/services/video_source/video_source_format.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+
+/// Returns the stream format if [url] points directly to a media playlist or
+/// video file (rather than an HTML play page), or `null` otherwise.
+VideoSourceFormat? detectDirectVideoSourceFormat(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || !uri.hasScheme) return null;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+  if (uri.host.isEmpty) return null;
+
+  final pathLower = uri.path.toLowerCase();
+  if (pathLower.endsWith('.html') ||
+      pathLower.endsWith('.htm') ||
+      pathLower.endsWith('.php') ||
+      pathLower.endsWith('.asp') ||
+      pathLower.endsWith('.aspx') ||
+      pathLower.endsWith('.jsp')) {
+    return null;
+  }
+  if (pathLower.endsWith('.m3u8')) {
+    return VideoSourceFormat.hls;
+  }
+  if (pathLower.endsWith('.mp4') ||
+      pathLower.endsWith('.mkv') ||
+      pathLower.endsWith('.flv') ||
+      pathLower.endsWith('.webm')) {
+    return VideoSourceFormat.auto;
+  }
+  return null;
+}
 
 String decodeVideoSource(String iframeUrl) {
   final decodedUrl = Uri.decodeFull(iframeUrl);

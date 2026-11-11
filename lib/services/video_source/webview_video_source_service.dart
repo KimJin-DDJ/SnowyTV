@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:kazumi/webview/video/video_webview_controller.dart';
 import 'package:kazumi/services/video_source/video_source_service.dart';
+import 'package:kazumi/utils/media.dart';
 
 /// WebView 视频源解析服务
 ///
@@ -31,6 +32,16 @@ class WebViewVideoSourceService implements IVideoSourceService {
     final resolveTail = _resolveTail;
     if (resolveTail == null) {
       throw const VideoSourceCancelledException();
+    }
+
+    final directFormat = detectDirectVideoSourceFormat(episodeUrl);
+    if (directFormat != null) {
+      return VideoSource(
+        url: episodeUrl.trim(),
+        offset: offset,
+        type: VideoSourceType.online,
+        format: directFormat,
+      );
     }
 
     _activeRequest?.cancel();

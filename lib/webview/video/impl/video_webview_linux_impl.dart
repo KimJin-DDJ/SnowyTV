@@ -114,8 +114,11 @@ class VideoWebviewLinuxImpl extends VideoWebviewController<Webview> {
         }
       }
       if (message.contains('videoMessage:')) {
-        String messageItem =
-            Uri.encodeFull(message.replaceFirst('videoMessage:', ''));
+        var rawVideo = message.replaceFirst('videoMessage:', '').trim();
+        if (rawVideo.startsWith('//')) {
+          rawVideo = 'https:$rawVideo';
+        }
+        String messageItem = Uri.encodeFull(rawVideo);
         logEventController
             .add('Callback received: [video] ${Uri.decodeFull(messageItem)}');
         if (messageItem.contains('http')) {

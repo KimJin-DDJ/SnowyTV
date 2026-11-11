@@ -293,4 +293,29 @@ void main() {
       throwsA(isA<ApiRuleFormatException>()),
     );
   });
+
+  test('renders sourceTemplate and rejects missing @source placeholder', () {
+    final search = engine.parseSearch(
+      '{"list":[{"name":"凡人修仙传","id":"a/b"}]}',
+      ApiSearchConfig(
+        listPath: r'$.list[*]',
+        namePath: r'$.name',
+        sourcePath: r'$.id',
+        sourceTemplate: 'https://example.com/GV@source.html',
+      ),
+    );
+    expect(search.items.single.src, 'https://example.com/GVa%2Fb.html');
+
+    expect(
+      () => engine.validateSearchConfig(
+        ApiSearchConfig(
+          listPath: r'$.list[*]',
+          namePath: r'$.name',
+          sourcePath: r'$.id',
+          sourceTemplate: 'https://example.com/detail',
+        ),
+      ),
+      throwsA(isA<ApiRuleFormatException>()),
+    );
+  });
 }
